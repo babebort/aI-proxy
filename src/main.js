@@ -1,427 +1,647 @@
-const { app, BrowserWindow, dialog, ipcMain, Menu, shell } = require('electron');
-const crypto = require('node:crypto');
-const fs = require('node:fs/promises');
+'use strict';
+
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu } = require('electron');
 const path = require('node:path');
+const fs = require('node:fs/promises');
+const os = require('node:os');
+const { spawn, execFile } = require('node:child_process');
+const { promisify } = require('node:util');
+const YAML = require('yaml');
 
-const GATEWAY_URL = 'http://127.0.0.1:9090/v1/chat/completions';
-const CONFIG_GID = 'cfe83f1b603c9dfef46e8ea3eca0eac2bfb59411a7687a405a05eb4c483f3949';
-const DEFAULT_MODEL = 'gpt-5.6-terra';
+const execFileAsync = promisify(execFile);
+
+const GID = 'cfe83f1b603c9dfef46e8ea3eca0eac2bfb59411a7687a405a05eb4c483f3949';
+const GATEWAY = 'http://127.0.0.1:9090';
+const CHAT_URL = `${GATEWAY}/v1/chat/completions`;
+const MODELS = [
+  'gpt-5.6-terra',
+  'gpt-5.6-luna',
+  'gpt-5.5',
+  'gpt-5.4-mini',
+  'codex-auto-review'
+];
+
+let mainWindow = null;
 const activeRequests = new Map();
+let authProcess = null;
+let authOutput = '';
 
-const DEFAULT_SETTINGS = {
-  theme: 'system',
-  highContrast: false,
-  accent: '#6d5dfc',
-  sendOnEnter: true,
-  streaming: true,
-  defaultModel: DEFAULT_MODEL,
-  autoFallback: true,
-  codeThemeLight: 'github-light',
-  codeThemeDark: 'github-dark',
-  codeFont: 'SFMono-Regular, Menlo, Monaco, Consolas, monospace'
-};
-
-const BUILT_IN_SKILLS = [
+const builtInSkills = [
   {
     id: 'builtin-code-reviewer',
     name: 'Code reviewer',
-    emoji: '🔍',
-    color: '#7c6cff',
-    system: 'You are a rigorous senior code reviewer. Analyze correctness, security, performance, maintainability, tests, and edge cases. Give prioritized, actionable feedback with concrete code examples when useful.',
-    model: 'codex-auto-review'
+    emoji: '🔎',
+    color: '#6d5efc',
+    model: 'codex-auto-review',
+    prompt: 'You are a meticulous senior code reviewer. Identify correctness, security, performance, readability, and maintainability issues. Give concrete fixes and prioritize findings.'
   },
   {
-    id: 'builtin-seo-copywriter',
+    id: 'builtin-seo',
     name: 'SEO copywriter',
     emoji: '✍️',
-    color: '#ef8b5d',
-    system: 'You are an expert SEO copywriter. Write clear, useful, original copy with a natural tone. Structure answers for readers first, use relevant search intent and keywords without stuffing, and suggest headings, meta title, and meta description when appropriate.'
+    color: '#e27a3f',
+    model: '',
+    prompt: 'You are an expert SEO copywriter. Produce clear, persuasive, search-friendly copy with useful structure, natural keywords, and an audience-first tone.'
   },
   {
-    id: 'builtin-senior-explainer',
+    id: 'builtin-explain',
     name: 'Explain like a senior engineer',
     emoji: '🧠',
-    color: '#4fbf9b',
-    system: 'Explain technical topics like a patient senior engineer mentoring a capable colleague. Start with the mental model, then explain trade-offs, practical examples, pitfalls, and a concise takeaway. Be precise and avoid unnecessary jargon.'
+    color: '#2784d8',
+    model: '',
+    prompt: 'Explain the subject like a kind senior engineer mentoring a capable colleague. Start with the mental model, then practical details, trade-offs, and examples.'
   },
   {
     id: 'builtin-translator',
     name: 'Translator RU ↔ EN',
     emoji: '🌐',
-    color: '#4f9eea',
-    system: 'You are a professional Russian-English translator. Detect the source language and translate into the other language. Preserve meaning, tone, formatting, names, code, URLs, and terminology. Briefly note ambiguities only when needed.'
+    color: '#27a26a',
+    model: '',
+    prompt: 'You are a precise professional translator between Russian and English. Preserve meaning, tone, formatting, names, terminology, and intent. Return only the translation unless clarification is necessary.'
   },
   {
     id: 'builtin-bug-hunter',
     name: 'Bug hunter',
-    emoji: '🐞',
-    color: '#df5d7a',
-    system: 'You are a meticulous bug hunter. Reproduce the issue conceptually, identify likely root causes, inspect assumptions and boundary conditions, and propose minimal safe fixes with verification steps and tests.'
+    emoji: '🐛',
+    color: '#d54a5c',
+    model: '',
+    prompt: 'You are an adversarial bug hunter. Analyze edge cases, race conditions, invalid assumptions, input validation, state transitions, and failure modes. Offer reproducible tests and fixes.'
   }
 ];
 
-const string = (value, fallback = '') => typeof value === 'string' ? value : fallback;
-const file = (name) => path.join(app.getPath('userData'), name);
-const requestKey = (sender, id) => `${sender.id}:${id}`;
+const builtInRoutines = [
+  {
+    id: 'builtin-summarize-translate',
+    name: 'Summarize → translate',
+    steps: [
+      'Summarize this clearly in concise bullet points:\n\n{{input}}',
+      'Translate this summary into Russian, preserving its structure:\n\n{{previous}}'
+    ]
+  },
+  {
+    id: 'builtin-draft-critique-revise',
+    name: 'Draft → critique → revise',
+    steps: [
+      'Create a strong first draft for this request:\n\n{{input}}',
+      'Critique the following draft. Identify weaknesses and propose specific improvements:\n\n{{previous}}',
+      'Write a final improved version using this critique and draft context:\n\n{{previous}}'
+    ]
+  }
+];
 
-function normalizeMessage(message) {
-  return {
-    role: ['user', 'assistant', 'system'].includes(message?.role) ? message.role : 'user',
-    content: string(message?.content),
-    ...(message?.err === true ? { err: true } : {}),
-    ts: Number.isFinite(message?.ts) ? message.ts : Date.now()
-  };
-}
-
-function normalizeChat(chat) {
-  const now = Date.now();
-  return {
-    id: string(chat?.id, crypto.randomUUID()),
-    title: string(chat?.title, 'Новый чат').trim() || 'Новый чат',
-    model: string(chat?.model, DEFAULT_MODEL),
-    systemPrompt: string(chat?.systemPrompt),
-    pinned: chat?.pinned === true,
-    createdAt: Number.isFinite(chat?.createdAt) ? chat.createdAt : now,
-    updatedAt: Number.isFinite(chat?.updatedAt) ? chat.updatedAt : now,
-    messages: Array.isArray(chat?.messages) ? chat.messages.map(normalizeMessage) : [],
-    ...(string(chat?.skillId) ? { skillId: string(chat.skillId) } : {})
-  };
-}
-
-function normalizeSkill(skill) {
-  return {
-    id: string(skill?.id, crypto.randomUUID()),
-    name: string(skill?.name, 'Новый навык').trim() || 'Новый навык',
-    emoji: string(skill?.emoji, '✨').slice(0, 8),
-    color: /^#[\da-f]{6}$/i.test(string(skill?.color)) ? skill.color : '#6d5dfc',
-    system: string(skill?.system),
-    ...(string(skill?.model) ? { model: string(skill.model) } : {})
-  };
-}
-
-function normalizeSettings(settings) {
-  const source = settings && typeof settings === 'object' ? settings : {};
-  return {
-    ...DEFAULT_SETTINGS,
-    ...source,
-    theme: ['system', 'light', 'dark'].includes(source.theme) ? source.theme : 'system',
-    highContrast: source.highContrast === true,
-    sendOnEnter: source.sendOnEnter !== false,
-    streaming: source.streaming !== false,
-    autoFallback: source.autoFallback !== false,
-    defaultModel: string(source.defaultModel, DEFAULT_MODEL)
-  };
+function dataPath(name) {
+  return path.join(app.getPath('userData'), name);
 }
 
 async function readJson(name, fallback) {
   try {
-    return JSON.parse(await fs.readFile(file(name), 'utf8'));
-  } catch (error) {
-    if (error.code === 'ENOENT' || error instanceof SyntaxError) return fallback;
-    throw error;
+    return JSON.parse(await fs.readFile(dataPath(name), 'utf8'));
+  } catch {
+    return fallback;
   }
 }
 
-async function writeJson(name, data) {
-  const destination = file(name);
-  const temporary = `${destination}.${process.pid}.${crypto.randomUUID()}.tmp`;
-  await fs.mkdir(path.dirname(destination), { recursive: true });
-  await fs.writeFile(temporary, JSON.stringify(data, null, 2), 'utf8');
-  await fs.rename(temporary, destination);
+async function writeJson(name, value) {
+  await fs.mkdir(app.getPath('userData'), { recursive: true });
+  const temp = `${dataPath(name)}.tmp`;
+  await fs.writeFile(temp, JSON.stringify(value, null, 2), 'utf8');
+  await fs.rename(temp, dataPath(name));
 }
 
-async function getApiKey() {
+const defaultSettings = {
+  theme: 'system',
+  highContrast: false,
+  accent: '#6d5efc',
+  sendOnEnter: true,
+  streaming: true,
+  defaultModel: MODELS[0],
+  autoFallback: true,
+  codeThemeLight: 'paper',
+  codeThemeDark: 'midnight',
+  codeFont: 'SFMono-Regular, Menlo, Monaco, Consolas, monospace'
+};
+
+async function configObject() {
+  try {
+    return YAML.parse(await fs.readFile(path.join(os.homedir(), 'codexer/config.yml'), 'utf8')) || {};
+  } catch {
+    return {};
+  }
+}
+
+async function groupConfig() {
+  const cfg = await configObject();
+  return (cfg.groups || []).find((group) => group.gid === GID) || {};
+}
+
+async function gatewayKey() {
   if (process.env.CODEXER_API_KEY?.trim()) return process.env.CODEXER_API_KEY.trim();
-
-  try {
-    const config = await fs.readFile(path.join(app.getPath('home'), 'codexer', 'config.yml'), 'utf8');
-    const groups = config.split(/\n(?=\s*-\s*(?:gid\s*:|\n))/);
-    for (const group of groups) {
-      const gid = group.match(/(?:^|\n)\s*(?:-\s*)?gid\s*:\s*['"]?([^'"\s#]+)['"]?/)?.[1];
-      const api = group.match(/(?:^|\n)\s*api\s*:\s*(.+?)\s*(?:#.*)?$/m)?.[1];
-      if (gid === CONFIG_GID && api?.trim()) return api.trim().replace(/^['"]|['"]$/g, '');
-    }
-  } catch {
-    return '';
-  }
-  return '';
+  const group = await groupConfig();
+  return String(group.api || '').trim();
 }
 
-function sendEvent(sender, payload) {
-  if (!sender.isDestroyed()) sender.send('chat:event', payload);
+function safeSend(channel, payload) {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
 }
 
-function errorText(body, fallback) {
+async function gatewayStatus() {
   try {
-    return string(JSON.parse(body)?.error?.message, fallback);
-  } catch {
-    return body.trim() || fallback;
+    const response = await fetch(`${GATEWAY}/`, {
+      signal: AbortSignal.timeout(1800)
+    });
+    return { up: response.ok || response.status < 500, detail: `HTTP ${response.status}` };
+  } catch (error) {
+    return { up: false, detail: error.message || 'Gateway unavailable' };
   }
 }
 
-async function streamChat(sender, request, controller) {
-  let hasText = false;
-  let errored = false;
-  let done = false;
-  const fail = (message) => {
-    if (!errored) {
-      errored = true;
-      sendEvent(sender, { id: request.id, t: 'err', d: message });
-    }
-  };
-  const finish = () => {
-    if (!done) {
-      done = true;
-      sendEvent(sender, { id: request.id, t: 'done', d: '' });
-    }
-  };
+async function kickstartGateway() {
+  try {
+    const { stdout } = await execFileAsync('id', ['-u']);
+    await execFileAsync('launchctl', [
+      'kickstart',
+      '-k',
+      `gui/${stdout.trim()}/com.bortnik.codexer`
+    ]);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
-  sendEvent(sender, { id: request.id, t: 'status', d: 'thinking' });
+async function ensureGateway() {
+  let status = await gatewayStatus();
+  if (status.up) return status;
+
+  const kicked = await kickstartGateway();
+  if (kicked) {
+    await new Promise((resolve) => setTimeout(resolve, 1600));
+    status = await gatewayStatus();
+    if (status.up) return status;
+  }
 
   try {
-    const key = await getApiKey();
-    if (!key) {
-      fail('API key не настроен. Укажите CODEXER_API_KEY или api в ~/codexer/config.yml.');
-      return;
-    }
+    await execFileAsync(path.join(os.homedir(), 'codexer-sweep/setup-codexer.sh'), [], {
+      timeout: 30000
+    });
+  } catch {
+    // The UI remains usable and presents gateway diagnostics.
+  }
 
-    const response = await fetch(GATEWAY_URL, {
+  await new Promise((resolve) => setTimeout(resolve, 1200));
+  return gatewayStatus();
+}
+
+function cleanMessages(messages) {
+  return (Array.isArray(messages) ? messages : [])
+    .filter((message) =>
+      message &&
+      ['system', 'user', 'assistant'].includes(message.role) &&
+      !message.error &&
+      typeof message.content === 'string' &&
+      message.content.trim()
+    )
+    .map(({ role, content }) => ({ role, content }));
+}
+
+function errorMessageFromBody(body, fallback) {
+  try {
+    const parsed = JSON.parse(body);
+    if (parsed?.error?.message) return String(parsed.error.message);
+    if (parsed?.message) return String(parsed.message);
+  } catch {
+    // Plain response body is still useful.
+  }
+  return body?.trim() || fallback;
+}
+
+async function streamChat(event, request) {
+  const requestId = String(request.requestId || '');
+  const model = MODELS.includes(request.model) ? request.model : MODELS[0];
+  const messages = cleanMessages(request.messages);
+  const key = await gatewayKey();
+
+  if (!key) {
+    event.sender.send('chat:event', {
+      requestId,
+      type: 'error',
+      message: 'Не найден API ключ Codexarion. Укажи CODEXER_API_KEY или проверь ~/codexer/config.yml.'
+    });
+    event.sender.send('chat:event', { requestId, type: 'done' });
+    return;
+  }
+
+  const controller = new AbortController();
+  activeRequests.set(requestId, controller);
+  event.sender.send('chat:event', { requestId, type: 'thinking' });
+
+  let accumulated = '';
+  let sawError = false;
+  let aborted = false;
+
+  try {
+    const response = await fetch(CHAT_URL, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Accept: 'text/event-stream, application/json' },
-      body: JSON.stringify({ model: request.model, messages: request.messages, stream: true }),
+      headers: {
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ model, messages, stream: request.streaming !== false }),
       signal: controller.signal
     });
 
     if (!response.ok) {
-      fail(errorText(await response.text(), `Ошибка gateway (${response.status})`));
-      return;
-    }
-
-    if (!response.headers.get('content-type')?.includes('text/event-stream')) {
+      sawError = true;
       const body = await response.text();
-      try {
-        const answer = JSON.parse(body)?.choices?.[0]?.message?.content;
-        if (typeof answer === 'string' && answer) {
-          hasText = true;
-          sendEvent(sender, { id: request.id, t: 'txt', d: answer });
-        } else fail(errorText(body, 'пустой ответ — лимит/таймаут'));
-      } catch {
-        fail(errorText(body, 'Gateway вернул некорректный ответ.'));
-      }
+      event.sender.send('chat:event', {
+        requestId,
+        type: 'error',
+        message: errorMessageFromBody(body, `Gateway error: HTTP ${response.status}`)
+      });
       return;
     }
 
-    if (!response.body) {
-      fail('Gateway не открыл поток ответа.');
+    const contentType = response.headers.get('content-type') || '';
+
+    if (!contentType.includes('text/event-stream')) {
+      const body = await response.text();
+      let parsed;
+      try {
+        parsed = JSON.parse(body);
+      } catch {
+        throw new Error(errorMessageFromBody(body, 'Gateway returned an invalid non-streaming response.'));
+      }
+
+      if (parsed?.error) {
+        sawError = true;
+        event.sender.send('chat:event', {
+          requestId,
+          type: 'error',
+          message: String(parsed.error.message || parsed.error)
+        });
+        return;
+      }
+
+      const text = parsed?.choices?.[0]?.message?.content;
+      if (text) {
+        accumulated += text;
+        event.sender.send('chat:event', { requestId, type: 'text', text });
+      }
       return;
     }
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
-    let complete = false;
+    let done = false;
 
-    const consume = (raw) => {
-      const line = raw.replace(/\r$/, '');
-      if (!line.startsWith('data:')) return;
-      const data = line.slice(5).trimStart();
-      if (data === '[DONE]') {
-        complete = true;
-        return;
-      }
-      if (!data) return;
+    while (!done) {
+      let stalled = false;
+      const stallTimer = setTimeout(() => { stalled = true; controller.abort(); }, 90_000);
+      let readerDone, value;
       try {
-        const chunk = JSON.parse(data);
-        if (typeof chunk?.error?.message === 'string') return fail(chunk.error.message);
-        const delta = chunk?.choices?.[0]?.delta?.content;
-        if (typeof delta === 'string' && delta) {
-          hasText = true;
-          sendEvent(sender, { id: request.id, t: 'txt', d: delta });
-        }
-      } catch {
-        fail('Gateway прислал некорректный фрагмент потока.');
+        ({ value, done: readerDone } = await reader.read());
+      } finally {
+        clearTimeout(stallTimer);
       }
-    };
-
-    while (!complete) {
-      const { value, done: readerDone } = await reader.read();
+      if (stalled) throw new Error('Таймаут ответа — сервер молчал более 90с.');
       if (readerDone) break;
+
       buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
+      const lines = buffer.split(/\r?\n/);
       buffer = lines.pop() || '';
-      lines.forEach(consume);
+
+      for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line || !line.startsWith('data:')) continue;
+
+        const payload = line.slice(5).trim();
+        if (payload === '[DONE]') {
+          done = true;
+          break;
+        }
+
+        let chunk;
+        try {
+          chunk = JSON.parse(payload);
+        } catch {
+          continue;
+        }
+
+        if (chunk?.error) {
+          sawError = true;
+          event.sender.send('chat:event', {
+            requestId,
+            type: 'error',
+            message: String(chunk.error.message || chunk.error)
+          });
+          done = true;
+          break;
+        }
+
+        const choice = chunk?.choices?.[0] || {};
+        const text = choice?.delta?.content ?? choice?.message?.content;
+        if (typeof text === 'string' && text.length) {
+          accumulated += text;
+          event.sender.send('chat:event', { requestId, type: 'text', text });
+        }
+      }
     }
-    buffer += decoder.decode();
-    if (buffer) consume(buffer);
-    if (!hasText && !errored && !controller.signal.aborted) fail('пустой ответ — лимит/таймаут');
   } catch (error) {
-    if (!controller.signal.aborted) fail(error?.message || 'Не удалось связаться с gateway.');
+    aborted = error?.name === 'AbortError';
+    sawError = true;
+    event.sender.send('chat:event', {
+      requestId,
+      type: aborted ? 'aborted' : 'error',
+      message: aborted ? 'Остановлено' : String(error?.message || error)
+    });
   } finally {
-    finish();
-    activeRequests.delete(requestKey(sender, request.id));
+    activeRequests.delete(requestId);
+
+    if (!accumulated && !sawError && !aborted) {
+      event.sender.send('chat:event', {
+        requestId,
+        type: 'error',
+        message: 'пустой ответ — вероятно лимит или таймаут; попробуй ещё раз или смени модель'
+      });
+    }
+
+    event.sender.send('chat:event', {
+      requestId,
+      type: 'done',
+      text: accumulated
+    });
   }
 }
 
-function installMenu() {
-  const command = (name) => {
-    const window = BrowserWindow.getFocusedWindow();
-    if (window && !window.isDestroyed()) window.webContents.send('app:command', name);
-  };
+async function accountsInfo() {
+  const group = await groupConfig();
+  const status = await gatewayStatus();
+  const users = Array.isArray(group.users) ? group.users : [];
 
-  Menu.setApplicationMenu(Menu.buildFromTemplate([
+  return {
+    gateway: status,
+    mode: 'multiuser',
+    groupFound: Boolean(group.gid),
+    accounts: users.map((user, index) => ({
+      id: String(user.id || user.email || user.alias || index),
+      alias: user.alias || user.label || user.name || '',
+      email: user.email || user.login || '',
+      label: user.label || user.name || '',
+      status: user.status || (user.rate_limited ? 'rate-limited' : 'active')
+    }))
+  };
+}
+
+function beginAuth() {
+  if (authProcess) throw new Error('Авторизация уже выполняется.');
+
+  const binary = path.join(os.homedir(), 'codexer/codexer');
+  authOutput = '';
+  authProcess = spawn(binary, ['auth'], {
+    cwd: path.join(os.homedir(), 'codexer'),
+    stdio: ['pipe', 'pipe', 'pipe']
+  });
+
+  authProcess.stdout.on('data', (data) => {
+    authOutput += data.toString();
+    const url = authOutput.match(/https?:\/\/[^\s"'<>]+/i)?.[0];
+    safeSend('auth:event', { type: 'output', output: authOutput.slice(-6000), url });
+    if (url) shell.openExternal(url).catch(() => {});
+  });
+
+  authProcess.stderr.on('data', (data) => {
+    authOutput += data.toString();
+    safeSend('auth:event', { type: 'output', output: authOutput.slice(-6000) });
+  });
+
+  authProcess.on('error', (error) => {
+    safeSend('auth:event', { type: 'error', message: error.message });
+    authProcess = null;
+  });
+
+  authProcess.on('close', async (code) => {
+    const output = authOutput;
+    authProcess = null;
+
+    if (code === 0) {
+      await kickstartGateway();
+      safeSend('auth:event', { type: 'done', success: true, output });
+    } else {
+      safeSend('auth:event', {
+        type: 'done',
+        success: false,
+        output,
+        message: `Команда codexer auth завершилась с кодом ${code}.`
+      });
+    }
+  });
+
+  return { output: authOutput };
+}
+
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1320,
+    height: 860,
+    minWidth: 940,
+    minHeight: 620,
+    title: 'Codexarion',
+    backgroundColor: '#f8f8fc',
+    vibrancy: 'sidebar',
+    visualEffectState: 'active',
+    titleBarStyle: 'hiddenInset',
+    trafficLightPosition: { x: 18, y: 18 },
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true
+    }
+  });
+
+  mainWindow.loadFile(path.join(__dirname, '../assets/index.html'));
+}
+
+function appMenu() {
+  const template = [
     {
       label: 'Codexarion',
-      submenu: [{ role: 'about' }, { type: 'separator' }, { role: 'services' }, { type: 'separator' }, { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' }]
+      submenu: [
+        { role: 'about' },
+        { type: 'separator' },
+        {
+          label: 'Settings…',
+          accelerator: 'CmdOrCtrl+,',
+          click: () => safeSend('menu:action', 'settings')
+        },
+        { type: 'separator' },
+        { role: 'services' },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' }
+      ]
     },
     {
-      label: 'Файл',
+      label: 'File',
       submenu: [
-        { label: 'Новый чат', accelerator: 'CommandOrControl+N', click: () => command('new-chat') },
-        { label: 'Экспортировать чат…', accelerator: 'CommandOrControl+Shift+E', click: () => command('export-chat') },
+        {
+          label: 'New Chat',
+          accelerator: 'CmdOrCtrl+N',
+          click: () => safeSend('menu:action', 'new-chat')
+        },
+        {
+          label: 'Export Conversation…',
+          accelerator: 'CmdOrCtrl+Shift+E',
+          click: () => safeSend('menu:action', 'export')
+        },
         { type: 'separator' },
         { role: 'close' }
       ]
     },
     {
-      label: 'Правка',
-      submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }, { type: 'separator' }, { label: 'Найти в чатах', accelerator: 'CommandOrControl+F', click: () => command('focus-search') }]
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
+        { role: 'cut' }, { role: 'copy' }, { role: 'paste' },
+        { role: 'selectAll' }
+      ]
     },
     {
-      label: 'Вид',
-      submenu: [{ label: 'Командная палитра', accelerator: 'CommandOrControl+K', click: () => command('palette') }, { label: 'Остановить ответ', accelerator: 'Escape', click: () => command('stop') }, { type: 'separator' }, { role: 'toggleDevTools' }, { role: 'togglefullscreen' }]
+      label: 'View',
+      submenu: [
+        {
+          label: 'Command Palette',
+          accelerator: 'CmdOrCtrl+K',
+          click: () => safeSend('menu:action', 'palette')
+        },
+        {
+          label: 'Search Chats',
+          accelerator: 'CmdOrCtrl+F',
+          click: () => safeSend('menu:action', 'search')
+        },
+        { role: 'toggleDevTools' }
+      ]
     },
-    { label: 'Окно', submenu: [{ role: 'minimize' }, { role: 'zoom' }, { type: 'separator' }, { role: 'front' }] }
-  ]));
+    {
+      label: 'Window',
+      submenu: [{ role: 'minimize' }, { role: 'zoom' }, { role: 'front' }]
+    }
+  ];
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-function registerIpc() {
-  ipcMain.handle('gateway:status', async () => {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 1500);
-    try {
-      await fetch('http://127.0.0.1:9090/', { signal: controller.signal });
-      return { up: true };
-    } catch {
-      return { up: false };
-    } finally {
-      clearTimeout(timeout);
-    }
-  });
+app.whenReady().then(async () => {
+  await fs.mkdir(app.getPath('userData'), { recursive: true });
 
-  ipcMain.on('chat:send', (event, payload) => {
-    const id = string(payload?.id);
-    if (!id) return;
-    const key = requestKey(event.sender, id);
-    activeRequests.get(key)?.abort();
-    const controller = new AbortController();
-    activeRequests.set(key, controller);
-    const messages = Array.isArray(payload?.messages)
-      ? payload.messages.filter((message) => ['user', 'assistant', 'system'].includes(message?.role)).map((message) => ({ role: message.role, content: string(message.content) }))
-      : [];
-    void streamChat(event.sender, { id, model: string(payload?.model, DEFAULT_MODEL), messages }, controller);
-  });
+  const skills = await readJson('skills.json', null);
+  if (!skills) await writeJson('skills.json', builtInSkills);
 
-  ipcMain.on('chat:stop', (event, id) => activeRequests.get(requestKey(event.sender, string(id)))?.abort());
+  const routines = await readJson('routines.json', null);
+  if (!routines) await writeJson('routines.json', builtInRoutines);
 
-  ipcMain.handle('store:listChats', async () => {
-    const chats = await readJson('conversations.json', []);
-    return Array.isArray(chats) ? chats.map(normalizeChat).sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updatedAt - a.updatedAt) : [];
-  });
+  const settings = await readJson('settings.json', null);
+  if (!settings) await writeJson('settings.json', defaultSettings);
 
-  ipcMain.handle('store:saveChat', async (_event, chat) => {
-    const chats = await readJson('conversations.json', []);
-    const list = Array.isArray(chats) ? chats.map(normalizeChat) : [];
-    const value = normalizeChat(chat);
-    const index = list.findIndex((item) => item.id === value.id);
-    if (index >= 0) {
-      value.createdAt = list[index].createdAt;
-      list[index] = value;
-    } else list.push(value);
-    await writeJson('conversations.json', list);
-  });
-
-  ipcMain.handle('store:deleteChat', async (_event, id) => {
-    const chats = await readJson('conversations.json', []);
-    await writeJson('conversations.json', (Array.isArray(chats) ? chats : []).filter((chat) => chat?.id !== id));
-  });
-
-  ipcMain.handle('store:getSettings', async () => normalizeSettings(await readJson('settings.json', DEFAULT_SETTINGS)));
-  ipcMain.handle('store:setSettings', async (_event, settings) => writeJson('settings.json', normalizeSettings(settings)));
-
-  ipcMain.handle('store:getSkills', async () => {
-    const skills = await readJson('skills.json', null);
-    if (!Array.isArray(skills)) {
-      const seeded = BUILT_IN_SKILLS.map(normalizeSkill);
-      await writeJson('skills.json', seeded);
-      return seeded;
-    }
-    return skills.map(normalizeSkill);
-  });
-
-  ipcMain.handle('store:setSkills', async (_event, skills) => {
-    await writeJson('skills.json', Array.isArray(skills) ? skills.map(normalizeSkill) : []);
-  });
-
-  ipcMain.handle('store:getRoutines', async () => []);
-  ipcMain.handle('store:setRoutines', async () => {});
-  ipcMain.handle('accounts:list', async () => []);
-  ipcMain.handle('accounts:addStart', async () => ({ loginUrl: '', session: '' }));
-  ipcMain.handle('accounts:addComplete', async () => ({ ok: false, accounts: [], error: 'Добавление аккаунтов пока недоступно.' }));
-  ipcMain.handle('accounts:restartDaemon', async () => ({ ok: false }));
-
-  ipcMain.handle('sys:exportChat', async (event, rawChat) => {
-    const chat = normalizeChat(rawChat);
-    const result = await dialog.showSaveDialog(BrowserWindow.fromWebContents(event.sender), {
-      title: 'Экспортировать чат',
-      defaultPath: `${chat.title.replace(/[\\/:*?"<>|]/g, '-').slice(0, 80) || 'codexer-chat'}.md`,
-      filters: [{ name: 'Markdown', extensions: ['md'] }]
-    });
-    if (result.canceled || !result.filePath) return { ok: false, canceled: true };
-    const output = [`# ${chat.title}`, '', ...chat.messages.flatMap((message) => [`## ${message.role === 'user' ? 'Пользователь' : message.role === 'assistant' ? 'Codexarion' : 'Система'}`, '', message.content, ''])].join('\n');
-    try {
-      await fs.writeFile(result.filePath, output, 'utf8');
-      return { ok: true, canceled: false };
-    } catch (error) {
-      return { ok: false, canceled: false, error: error?.message || 'Не удалось сохранить файл.' };
-    }
-  });
-
-  ipcMain.on('sys:openExternal', (_event, rawUrl) => {
-    try {
-      const url = new URL(string(rawUrl));
-      if (url.protocol === 'http:' || url.protocol === 'https:') void shell.openExternal(url.toString());
-    } catch {
-      // Invalid renderer input is ignored.
-    }
-  });
-}
-
-function createWindow() {
-  const window = new BrowserWindow({
-    width: 1220,
-    height: 800,
-    minWidth: 880,
-    minHeight: 600,
-    title: 'Codexarion',
-    titleBarStyle: 'hiddenInset',
-    backgroundColor: '#111217',
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true
-    }
-  });
-  void window.loadFile(path.join(__dirname, 'renderer', 'index.html'));
-}
-
-app.whenReady().then(() => {
-  registerIpc();
-  installMenu();
   createWindow();
+  appMenu();
+  ensureGateway().then((status) => safeSend('gateway:status', status));
+
   app.on('activate', () => {
-    if (!BrowserWindow.getAllWindows().length) createWindow();
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+});
+
+ipcMain.handle('app:bootstrap', async () => ({
+  version: app.getVersion(),
+  models: MODELS,
+  settings: { ...defaultSettings, ...(await readJson('settings.json', {})) },
+  conversations: await readJson('conversations.json', []),
+  skills: await readJson('skills.json', builtInSkills),
+  routines: await readJson('routines.json', builtInRoutines),
+  gateway: await gatewayStatus(),
+  userData: app.getPath('userData')
+}));
+
+ipcMain.handle('store:save', async (_event, type, value) => {
+  const allowed = new Set(['conversations', 'skills', 'routines', 'settings']);
+  if (!allowed.has(type)) throw new Error('Invalid store.');
+  await writeJson(`${type}.json`, value);
+  return true;
+});
+
+ipcMain.handle('chat:start', async (event, request) => {
+  streamChat(event, request).catch((error) => {
+    event.sender.send('chat:event', {
+      requestId: request.requestId,
+      type: 'error',
+      message: String(error.message || error)
+    });
+    event.sender.send('chat:event', { requestId: request.requestId, type: 'done' });
+  });
+  return true;
+});
+
+ipcMain.handle('chat:stop', async (_event, requestId) => {
+  const controller = activeRequests.get(String(requestId));
+  if (controller) controller.abort();
+  return Boolean(controller);
+});
+
+ipcMain.handle('gateway:ensure', ensureGateway);
+ipcMain.handle('accounts:get', accountsInfo);
+
+ipcMain.handle('accounts:auth-start', async () => beginAuth());
+
+ipcMain.handle('accounts:auth-code', async (_event, code) => {
+  if (!authProcess) throw new Error('Нет активного процесса авторизации.');
+  authProcess.stdin.write(`${String(code).trim()}\n`);
+  return true;
+});
+
+ipcMain.handle('export:conversation', async (_event, markdown, suggestedName) => {
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: 'Export conversation',
+    defaultPath: `${suggestedName || 'codexer-chat'}.md`,
+    filters: [{ name: 'Markdown', extensions: ['md'] }]
+  });
+
+  if (result.canceled || !result.filePath) return false;
+  await fs.writeFile(result.filePath, markdown, 'utf8');
+  return result.filePath;
+});
+
+ipcMain.handle('export:all', async (_event, markdown) => {
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: 'Export all Codexarion data',
+    defaultPath: 'codexer-export.md',
+    filters: [{ name: 'Markdown', extensions: ['md'] }]
+  });
+
+  if (result.canceled || !result.filePath) return false;
+  await fs.writeFile(result.filePath, markdown, 'utf8');
+  return result.filePath;
+});
+
+ipcMain.handle('data:clear', async () => {
+  await Promise.all([
+    writeJson('conversations.json', []),
+    writeJson('skills.json', builtInSkills),
+    writeJson('routines.json', builtInRoutines),
+    writeJson('settings.json', defaultSettings)
+  ]);
+  return true;
+});
+
+ipcMain.handle('shell:open', async (_event, url) => {
+  if (!/^https?:\/\//i.test(String(url))) throw new Error('Unsupported URL.');
+  await shell.openExternal(url);
+  return true;
 });
 
 app.on('window-all-closed', () => {

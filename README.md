@@ -1,36 +1,19 @@
 # Codexarion
 
-Нативное десктоп-приложение (Electron) для чата через локальный OpenAI-совместимый
-шлюз **codexer** (`http://127.0.0.1:9090`). Работает на твоём ключе, без облака.
+Codexarion is a native macOS Electron desktop client for a local Codexarion gateway:
 
-## Что умеет (база)
+- Gateway: `http://127.0.0.1:9090`
+- Protocol: OpenAI-compatible `/v1/chat/completions`
+- API key remains only in the Electron main process.
+- The renderer is sandboxed, uses `contextIsolation`, has no Node integration,
+  does not receive the API key, and never makes network requests itself.
 
-- Стриминг ответа с индикатором «думает… Ns» и ловлей ошибок/лимитов (без зависаний).
-- Сохранение чатов на диск; сайдбар: поиск по сообщениям, закрепление, удаление, переименование.
-- Markdown с код-блоками (Copy), таблицами, цитатами, списками; действия над сообщениями: Copy / Regenerate / Edit.
-- Выбор модели (запоминается), тема (системная/светлая/тёмная), командная палитра (⌘K), меню и горячие клавиши.
-- Экспорт чата в `.md`.
+## Requirements
 
-## Требования
-
-- macOS (Apple Silicon), Node.js 24+.
-- Запущенный шлюз codexer на `http://127.0.0.1:9090` (LaunchAgent-демон, живёт отдельно от приложения).
-
-## Запуск
-
-```bash
-npm install
-npm start
-```
-
-## Сборка .app
-
-```bash
-npm run dist
-```
-
-## Безопасность
-
-Рендерер изолирован (`contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`)
-и общается с системой только через явный мост `window.codexer`. API-ключ живёт только в
-main-процессе (читается из `~/codexer/config.yml`) и никогда не попадает в рендерер.
+- macOS Apple Silicon
+- Node.js 24+
+- A running Codexarion installation under `~/codexer`
+- Gateway configured for `127.0.0.1:9090`
+- Either:
+  - `CODEXER_API_KEY` in the Electron launch environment, or
+  - a key in `~/codexer/config.yml` at:

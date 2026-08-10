@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Codexarion</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="window-space"></div>
+    <div class="brand-row">
+      <div class="brand"><span class="brand-mark">✦</span><span>Codexarion</span></div>
+      <button class="icon-button" id="new-chat" title="New chat">＋</button>
+    </div>
+
+    <div class="sidebar-search">
+      <span>⌕</span>
+      <input id="chat-search" placeholder="Search chats">
+      <kbd>⌘F</kbd>
+    </div>
+
+    <div class="sidebar-actions">
+      <button id="skills-button">✦ Skills</button>
+      <button id="routines-button">◌ Routines</button>
+    </div>
+
+    <div id="chat-list" class="chat-list"></div>
+
+    <div class="sidebar-bottom">
+      <button id="accounts-button"><span id="gateway-dot" class="status-dot"></span><span>Accounts</span></button>
+      <button id="settings-button">⚙ Settings</button>
+    </div>
+  </aside>
+
+  <main class="workspace">
+    <header class="topbar">
+      <div class="chat-heading">
+        <input id="chat-title" aria-label="Conversation title" value="New chat">
+        <button id="system-prompt-button" title="Per-chat system prompt">☷</button>
+      </div>
+
+      <div class="topbar-right">
+        <span id="gateway-label" class="gateway-label">Checking gateway…</span>
+        <select id="model-picker" aria-label="Model"></select>
+        <button id="palette-button" class="header-button" title="Command palette">⌘K</button>
+      </div>
+    </header>
+
+    <section id="chat-view" class="chat-view">
+      <div id="empty-state" class="empty-state">
+        <div class="hero-mark">✦</div>
+        <h1>How can I help?</h1>
+        <p>Codexarion talks to your local gateway. Your API key never reaches this renderer.</p>
+        <div class="suggestions">
+          <button data-prompt="Review this code for bugs and improvements.">Review code</button>
+          <button data-prompt="Explain this architecture like a senior engineer.">Explain architecture</button>
+          <button data-prompt="Help me write a clear technical plan.">Make a plan</button>
+        </div>
+      </div>
+      <div id="messages" class="messages"></div>
+    </section>
+
+    <section class="composer-wrap">
+      <div id="routine-banner" class="routine-banner hidden"></div>
+      <form id="composer" class="composer">
+        <textarea id="prompt" rows="1" placeholder="Message Codexarion…"></textarea>
+        <button id="send-button" type="submit" title="Send">
+          <span id="send-icon">↑</span>
+        </button>
+      </form>
+      <div class="composer-footer">
+        <span>Enter to send · Shift+Enter for a new line</span>
+        <span>Local gateway · 272k context</span>
+      </div>
+    </section>
+  </main>
+
+  <div id="modal-root"></div>
+  <div id="toast-root"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

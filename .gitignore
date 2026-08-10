@@ -1,8 +1,6 @@
 node_modules/
-dist/
-out/
+release/
+build/icon.icns
+build/*.iconset
 .DS_Store
-*.log
-.env
-.env.*
-!.env.example
+npm-debug.log*
