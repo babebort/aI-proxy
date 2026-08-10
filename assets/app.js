@@ -44,6 +44,7 @@ const elements = {
   toastRoot: $('#toast-root'),
   routineBanner: $('#routine-banner'),
   agentToggle: $('#agent-toggle'),
+  autoApproveToggle: $('#auto-approve-toggle'),
   workspaceButton: $('#workspace-button')
 };
 
@@ -437,7 +438,7 @@ async function sendPrompt(rawText, options = {}) {
   };
 
   if (chat.agentMode) {
-    await window.codexer.startAgent(payload);
+    await window.codexer.startAgent({ ...payload, autoApprove: Boolean(chat.autoApprove) });
   } else {
     await window.codexer.startChat(payload);
   }
@@ -487,6 +488,12 @@ function renderAgentControls() {
       : '📁 Workspace';
     elements.workspaceButton.title = state.workspace || 'Pick workspace folder for Agent mode';
   }
+  if (elements.autoApproveToggle) {
+    elements.autoApproveToggle.hidden = !on;
+    const auto = Boolean(chat?.autoApprove);
+    elements.autoApproveToggle.textContent = `⚠️ Auto-approve: ${auto ? 'on' : 'off'}`;
+    elements.autoApproveToggle.classList.toggle('active', auto);
+  }
 }
 
 elements.agentToggle?.addEventListener('click', () => {
@@ -497,6 +504,18 @@ elements.agentToggle?.addEventListener('click', () => {
   saveConversations();
   renderAgentControls();
   toast(chat.agentMode ? 'Agent mode on — mutating actions need your approval' : 'Agent mode off');
+});
+
+elements.autoApproveToggle?.addEventListener('click', () => {
+  const chat = activeChat();
+  if (!chat || !chat.agentMode || state.busy) return;
+  chat.autoApprove = !chat.autoApprove;
+  chat.updatedAt = new Date().toISOString();
+  saveConversations();
+  renderAgentControls();
+  toast(chat.autoApprove
+    ? 'Auto-approve on — write/edit/run will execute without confirmation'
+    : 'Auto-approve off');
 });
 
 elements.workspaceButton?.addEventListener('click', async () => {
@@ -521,7 +540,11 @@ function diffStat(diff) {
 }
 
 function toolCardHtml(tool) {
-  const status = tool.result ? (tool.result.ok ? 'Done' : 'Failed') : tool.approvalId ? 'Needs approval' : 'Running…';
+  const status = tool.result
+    ? (tool.result.ok ? 'Done' : 'Failed')
+    : tool.approvalId ? 'Needs approval'
+    : tool.autoApproved ? 'Auto-approved'
+    : 'Running…';
   const verb = TOOL_VERBS[tool.name] || tool.name || 'Tool';
   const label = tool.name === 'run_command'
     ? `${verb} a command`
@@ -575,7 +598,8 @@ function handleAgentEvent(event) {
       path: event.tool.path,
       command: event.tool.command,
       diff: event.tool.diff,
-      approvalId: ''
+      approvalId: '',
+      autoApproved: Boolean(event.autoApproved)
     });
     renderToolCards();
     return;

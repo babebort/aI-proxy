@@ -108,6 +108,7 @@ kbd { font-size: 10px; background: var(--hover); padding: 1px 4px; border-radius
 }
 .header-button { border: 1px solid var(--line); font-size: 11px; padding: 6px 8px; }
 .header-button.active { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+#auto-approve-toggle.active { border-color: #d5504f; color: #d5504f; background: color-mix(in srgb, #d5504f 12%, transparent); }
 
 #tool-cards { width: min(870px, calc(100% - 38px)); margin: 0 auto; display: flex; flex-direction: column; gap: 8px; }
 .tool-card { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); font-size: 12px; overflow: hidden; }

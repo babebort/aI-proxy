@@ -531,7 +531,7 @@ function waitForApproval(sender, requestId, tool) {
   });
 }
 
-async function executeTool(sender, requestId, workspace, call, signal) {
+async function executeTool(sender, requestId, workspace, call, signal, autoApprove) {
   const name = call.function?.name;
   let args;
   try { args = JSON.parse(call.function?.arguments || '{}'); } catch { return { ok: false, text: 'Некорректные JSON-аргументы инструмента.' }; }
@@ -554,9 +554,9 @@ async function executeTool(sender, requestId, workspace, call, signal) {
     return { ok: false, text: error.message };
   }
 
-  sender.send('agent:event', { requestId, type: 'tool', callId: call.id, tool: preview });
+  sender.send('agent:event', { requestId, type: 'tool', callId: call.id, tool: preview, autoApproved: mutating && autoApprove });
 
-  if (mutating) {
+  if (mutating && !autoApprove) {
     const approved = await waitForApproval(sender, requestId, preview);
     if (!approved) {
       const result = { ok: false, text: 'Пользователь отклонил действие.' };
@@ -671,6 +671,7 @@ async function runAgent(event, request) {
   }
 
   const controller = new AbortController();
+  const autoApprove = request.autoApprove === true;
   const agent = { requestId, model: MODELS.includes(request.model) ? request.model : MODELS[0], messages: cleanMessages(request.messages), controller };
   activeAgents.set(requestId, agent);
   event.sender.send('agent:event', { requestId, type: 'workspace', workspace });
@@ -687,7 +688,7 @@ async function runAgent(event, request) {
       agent.messages.push({ role: 'assistant', content: turn.content || null, tool_calls: turn.toolCalls });
       for (const call of turn.toolCalls) {
         if (controller.signal.aborted) break;
-        const result = await executeTool(event.sender, requestId, workspace, call, controller.signal);
+        const result = await executeTool(event.sender, requestId, workspace, call, controller.signal, autoApprove);
         agent.messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) });
       }
     }
