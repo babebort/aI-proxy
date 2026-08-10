@@ -353,9 +353,14 @@ function renderBusyBubble() {
 
 function updateThinking() {
   if (!state.busy) return;
-  const elapsed = Math.max(0, Math.floor((Date.now() - state.busy.startedAt) / 1000));
   const target = $('#busy-row .elapsed');
-  if (target && !state.busy.startedText) target.textContent = `думает… ${elapsed}с`;
+  if (!target || state.busy.startedText) return;
+  if (state.busy.retryStatus) {
+    target.textContent = state.busy.retryStatus;
+    return;
+  }
+  const elapsed = Math.max(0, Math.floor((Date.now() - state.busy.startedAt) / 1000));
+  target.textContent = `думает… ${elapsed}с`;
 }
 
 function scrollBottom() {
@@ -623,6 +628,12 @@ function handleAgentEvent(event) {
 
 function handleChatEvent(event) {
   if (!state.busy || event.requestId !== state.busy.requestId) return;
+
+  if (event.type === 'retrying') {
+    state.busy.retryStatus = `лимит достигнут, повтор ${event.attempt}/${event.max}…`;
+    updateThinking();
+    return;
+  }
 
   if (event.type === 'text') {
     state.busy.startedText = true;

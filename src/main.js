@@ -225,50 +225,29 @@ function errorMessageFromBody(body, fallback) {
   return body?.trim() || fallback;
 }
 
-async function streamChat(event, request) {
-  const requestId = String(request.requestId || '');
-  const model = MODELS.includes(request.model) ? request.model : MODELS[0];
-  const messages = cleanMessages(request.messages);
-  const key = await gatewayKey();
+const AUTO_RETRYABLE = /usage limit|rate limit|too many requests|try again/i;
 
-  if (!key) {
-    event.sender.send('chat:event', {
-      requestId,
-      type: 'error',
-      message: 'Не найден API ключ Codexarion. Укажи CODEXER_API_KEY или проверь ~/codexer/config.yml.'
-    });
-    event.sender.send('chat:event', { requestId, type: 'done' });
-    return;
-  }
-
-  const controller = new AbortController();
-  activeRequests.set(requestId, controller);
-  event.sender.send('chat:event', { requestId, type: 'thinking' });
-
+async function attemptStreamOnce(event, requestId, model, messages, streaming, controller) {
   let accumulated = '';
   let sawError = false;
+  let errorMessage = '';
   let aborted = false;
 
   try {
     const response = await fetch(CHAT_URL, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${key}`,
+        Authorization: `Bearer ${await gatewayKey()}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ model, messages, stream: request.streaming !== false }),
+      body: JSON.stringify({ model, messages, stream: streaming !== false }),
       signal: controller.signal
     });
 
     if (!response.ok) {
       sawError = true;
-      const body = await response.text();
-      event.sender.send('chat:event', {
-        requestId,
-        type: 'error',
-        message: errorMessageFromBody(body, `Gateway error: HTTP ${response.status}`)
-      });
-      return;
+      errorMessage = errorMessageFromBody(await response.text(), `Gateway error: HTTP ${response.status}`);
+      return { accumulated, sawError, errorMessage, aborted };
     }
 
     const contentType = response.headers.get('content-type') || '';
@@ -284,12 +263,8 @@ async function streamChat(event, request) {
 
       if (parsed?.error) {
         sawError = true;
-        event.sender.send('chat:event', {
-          requestId,
-          type: 'error',
-          message: String(parsed.error.message || parsed.error)
-        });
-        return;
+        errorMessage = String(parsed.error.message || parsed.error);
+        return { accumulated, sawError, errorMessage, aborted };
       }
 
       const text = parsed?.choices?.[0]?.message?.content;
@@ -297,7 +272,7 @@ async function streamChat(event, request) {
         accumulated += text;
         event.sender.send('chat:event', { requestId, type: 'text', text });
       }
-      return;
+      return { accumulated, sawError, errorMessage, aborted };
     }
 
     const reader = response.body.getReader();
@@ -340,11 +315,7 @@ async function streamChat(event, request) {
 
         if (chunk?.error) {
           sawError = true;
-          event.sender.send('chat:event', {
-            requestId,
-            type: 'error',
-            message: String(chunk.error.message || chunk.error)
-          });
+          errorMessage = String(chunk.error.message || chunk.error);
           done = true;
           break;
         }
@@ -360,28 +331,84 @@ async function streamChat(event, request) {
   } catch (error) {
     aborted = error?.name === 'AbortError';
     sawError = true;
+    errorMessage = aborted ? 'Остановлено' : String(error?.message || error);
+  }
+
+  return { accumulated, sawError, errorMessage, aborted };
+}
+
+async function streamChat(event, request) {
+  const requestId = String(request.requestId || '');
+  const model = MODELS.includes(request.model) ? request.model : MODELS[0];
+  const messages = cleanMessages(request.messages);
+  const key = await gatewayKey();
+
+  if (!key) {
+    event.sender.send('chat:event', {
+      requestId,
+      type: 'error',
+      message: 'Не найден API ключ Codexarion. Укажи CODEXER_API_KEY или проверь ~/codexer/config.yml.'
+    });
+    event.sender.send('chat:event', { requestId, type: 'done' });
+    return;
+  }
+
+  const controller = new AbortController();
+  activeRequests.set(requestId, controller);
+  event.sender.send('chat:event', { requestId, type: 'thinking' });
+
+  const MAX_AUTO_RETRIES = 4;
+  const BACKOFF_MS = [1500, 3000, 6000, 10000];
+  let accumulated = '';
+  let sawError = false;
+  let aborted = false;
+  let errorMessage = '';
+
+  for (let attempt = 0; attempt <= MAX_AUTO_RETRIES; attempt += 1) {
+    const result = await attemptStreamOnce(event, requestId, model, messages, request.streaming, controller);
+    accumulated = result.accumulated;
+    sawError = result.sawError;
+    aborted = result.aborted;
+    errorMessage = result.errorMessage;
+
+    const shouldAutoRetry = sawError && !aborted && !accumulated &&
+      AUTO_RETRYABLE.test(errorMessage) && attempt < MAX_AUTO_RETRIES;
+
+    if (!shouldAutoRetry) break;
+
+    event.sender.send('chat:event', {
+      requestId,
+      type: 'retrying',
+      message: errorMessage,
+      attempt: attempt + 1,
+      max: MAX_AUTO_RETRIES
+    });
+    await new Promise((resolve) => setTimeout(resolve, BACKOFF_MS[attempt] || 10000));
+    if (controller.signal.aborted) break;
+    event.sender.send('chat:event', { requestId, type: 'thinking' });
+  }
+
+  activeRequests.delete(requestId);
+
+  if (sawError && errorMessage) {
     event.sender.send('chat:event', {
       requestId,
       type: aborted ? 'aborted' : 'error',
-      message: aborted ? 'Остановлено' : String(error?.message || error)
+      message: aborted ? 'Остановлено' : errorMessage
     });
-  } finally {
-    activeRequests.delete(requestId);
-
-    if (!accumulated && !sawError && !aborted) {
-      event.sender.send('chat:event', {
-        requestId,
-        type: 'error',
-        message: 'пустой ответ — вероятно лимит или таймаут; попробуй ещё раз или смени модель'
-      });
-    }
-
+  } else if (!accumulated && !sawError && !aborted) {
     event.sender.send('chat:event', {
       requestId,
-      type: 'done',
-      text: accumulated
+      type: 'error',
+      message: 'пустой ответ — вероятно лимит или таймаут; попробуй ещё раз или смени модель'
     });
   }
+
+  event.sender.send('chat:event', {
+    requestId,
+    type: 'done',
+    text: accumulated
+  });
 }
 
 async function accountsInfo() {
