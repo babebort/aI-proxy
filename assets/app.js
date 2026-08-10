@@ -1,5 +1,12 @@
 'use strict';
 
+window.addEventListener('error', (e) => {
+  console.error('UNCAUGHT', e.message, e.filename + ':' + e.lineno);
+});
+window.addEventListener('unhandledrejection', (e) => {
+  console.error('UNHANDLED-REJECTION', String(e.reason));
+});
+
 const $ = (selector, root = document) => root.querySelector(selector);
 const escapeHtml = (value = '') => String(value).replace(/[&<>"']/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -14,7 +21,9 @@ const state = {
   activeId: null,
   busy: null,
   gateway: { up: false, detail: 'Checking gateway…' },
-  routineRun: null
+  routineRun: null,
+  workspace: '',
+  tools: new Map()
 };
 
 const elements = {
@@ -33,7 +42,9 @@ const elements = {
   gatewayDot: $('#gateway-dot'),
   modalRoot: $('#modal-root'),
   toastRoot: $('#toast-root'),
-  routineBanner: $('#routine-banner')
+  routineBanner: $('#routine-banner'),
+  agentToggle: $('#agent-toggle'),
+  workspaceButton: $('#workspace-button')
 };
 
 function id() {
@@ -372,6 +383,7 @@ function render() {
   renderMessages();
   renderGateway();
   renderRoutineBanner();
+  renderAgentControls();
 }
 
 function setBusy(busy) {
@@ -417,12 +429,18 @@ async function sendPrompt(rawText, options = {}) {
   }
 
   renderMessages();
-  await window.codexer.startChat({
+  const payload = {
     requestId,
     model: chat.model,
     messages: [...systemMessages, ...chat.messages],
     streaming: state.settings.streaming !== false
-  });
+  };
+
+  if (chat.agentMode) {
+    await window.codexer.startAgent(payload);
+  } else {
+    await window.codexer.startChat(payload);
+  }
 }
 
 function finishBusy(errorMessage = '') {
@@ -453,6 +471,127 @@ function finishBusy(errorMessage = '') {
   } else if (state.routineRun) {
     state.routineRun = null;
     renderRoutineBanner();
+  }
+}
+
+function renderAgentControls() {
+  const chat = activeChat();
+  const on = Boolean(chat?.agentMode);
+  if (elements.agentToggle) {
+    elements.agentToggle.textContent = `🤖 Agent: ${on ? 'on' : 'off'}`;
+    elements.agentToggle.classList.toggle('active', on);
+  }
+  if (elements.workspaceButton) {
+    elements.workspaceButton.textContent = state.workspace
+      ? `📁 ${state.workspace.split('/').pop()}`
+      : '📁 Workspace';
+    elements.workspaceButton.title = state.workspace || 'Pick workspace folder for Agent mode';
+  }
+}
+
+elements.agentToggle?.addEventListener('click', () => {
+  const chat = activeChat();
+  if (!chat || state.busy) return;
+  chat.agentMode = !chat.agentMode;
+  chat.updatedAt = new Date().toISOString();
+  saveConversations();
+  renderAgentControls();
+  toast(chat.agentMode ? 'Agent mode on — mutating actions need your approval' : 'Agent mode off');
+});
+
+elements.workspaceButton?.addEventListener('click', async () => {
+  const result = await window.codexer.pickWorkspace();
+  if (!result.canceled) {
+    state.workspace = result.path;
+    renderAgentControls();
+    toast(`Workspace: ${result.path}`);
+  }
+});
+
+const TOOL_VERBS = { read_file: 'Read', list_dir: 'Listed', write_file: 'Wrote', edit_file: 'Edited', run_command: 'Ran' };
+
+function diffStat(diff) {
+  if (!diff) return '';
+  let added = 0, removed = 0;
+  for (const line of diff.split('\n')) {
+    if (line.startsWith('+')) added += 1;
+    else if (line.startsWith('-')) removed += 1;
+  }
+  return added || removed ? ` <span class="stat-add">+${added}</span> <span class="stat-del">-${removed}</span>` : '';
+}
+
+function toolCardHtml(tool) {
+  const status = tool.result ? (tool.result.ok ? 'Done' : 'Failed') : tool.approvalId ? 'Needs approval' : 'Running…';
+  const verb = TOOL_VERBS[tool.name] || tool.name || 'Tool';
+  const label = tool.name === 'run_command'
+    ? `${verb} a command`
+    : `${verb} ${escapeHtml(tool.path || '')}${diffStat(tool.diff)}`;
+  const diff = tool.diff ? `<pre class="diff-block">${escapeHtml(tool.diff)}</pre>` : '';
+  const command = tool.command ? `<pre class="diff-block">${escapeHtml(tool.command)}</pre>` : '';
+  const resultText = tool.result ? `<pre class="tool-result">${escapeHtml(tool.result.text || '')}</pre>` : '';
+  const actions = tool.approvalId && !tool.result
+    ? `<div class="tool-actions"><button data-approve="${tool.approvalId}" data-ok="1">Approve</button><button data-approve="${tool.approvalId}" data-ok="0">Deny</button></div>`
+    : '';
+  return `<article class="tool-card${tool.result?.ok === false ? ' failed' : ''}">
+    <header><span class="tool-label">${label}</span><span class="tool-status">${status}</span></header>
+    ${command}${diff}${resultText}${actions}
+  </article>`;
+}
+
+function renderToolCards() {
+  const container = $('#tool-cards') || (() => {
+    const el = document.createElement('div');
+    el.id = 'tool-cards';
+    elements.messages?.appendChild(el);
+    return el;
+  })();
+  const chat = activeChat();
+  const cards = [...state.tools.values()].filter((t) => t.chatId === chat?.id);
+  container.innerHTML = cards.map(toolCardHtml).join('');
+  container.querySelectorAll('[data-approve]').forEach((button) => {
+    button.onclick = () => {
+      window.codexer.approveAgent(button.dataset.approve, button.dataset.ok === '1');
+      const tool = [...state.tools.values()].find((t) => t.approvalId === button.dataset.approve);
+      if (tool) tool.approvalId = '';
+      renderToolCards();
+    };
+  });
+  scrollBottom();
+}
+
+function handleAgentEvent(event) {
+  if (!state.busy || event.requestId !== state.busy.requestId) return;
+
+  if (event.type === 'workspace') {
+    state.workspace = event.workspace;
+    renderAgentControls();
+    return;
+  }
+
+  if (event.type === 'tool') {
+    state.tools.set(event.callId, {
+      chatId: state.busy.chatId,
+      name: event.tool.name,
+      path: event.tool.path,
+      command: event.tool.command,
+      diff: event.tool.diff,
+      approvalId: ''
+    });
+    renderToolCards();
+    return;
+  }
+
+  if (event.type === 'approval') {
+    const entry = [...state.tools.values()].reverse().find((t) => t.chatId === state.busy.chatId && !t.approvalId && !t.result);
+    if (entry) entry.approvalId = event.approvalId;
+    renderToolCards();
+    return;
+  }
+
+  if (event.type === 'result') {
+    const tool = state.tools.get(event.callId);
+    if (tool) tool.result = { ok: event.ok, text: event.text };
+    renderToolCards();
   }
 }
 
@@ -1050,8 +1189,15 @@ async function bootstrap() {
 
   applyTheme();
   render();
+  renderAgentControls();
+
+  window.codexer.getWorkspace().then(({ path }) => {
+    state.workspace = path || '';
+    renderAgentControls();
+  }).catch(() => {});
 
   window.codexer.onChatEvent(handleChatEvent);
+  window.codexer.onAgentEvent(handleAgentEvent);
   window.codexer.onGatewayStatus((gateway) => {
     state.gateway = gateway;
     renderGateway();

@@ -23,8 +23,18 @@ const MODELS = [
 
 let mainWindow = null;
 const activeRequests = new Map();
+const activeAgents = new Map();
+const pendingApprovals = new Map();
 let authProcess = null;
 let authOutput = '';
+
+const AGENT_TOOLS = [
+  { type: 'function', function: { name: 'read_file', description: 'Read a UTF-8 text file inside the workspace.', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } } },
+  { type: 'function', function: { name: 'list_dir', description: 'List entries in a workspace directory.', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: [] } } },
+  { type: 'function', function: { name: 'write_file', description: 'Create or overwrite a UTF-8 text file in the workspace. Requires user approval.', parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } }, required: ['path', 'content'] } } },
+  { type: 'function', function: { name: 'edit_file', description: 'Replace one exact occurrence of text in a workspace file. Requires user approval.', parameters: { type: 'object', properties: { path: { type: 'string' }, old: { type: 'string' }, new: { type: 'string' } }, required: ['path', 'old', 'new'] } } },
+  { type: 'function', function: { name: 'run_command', description: 'Run a bash command from the workspace root. Requires user approval.', parameters: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] } } }
+];
 
 const builtInSkills = [
   {
@@ -440,6 +450,260 @@ function beginAuth() {
   return { output: authOutput };
 }
 
+async function workspacePath() {
+  const settings = await readJson('settings.json', {});
+  if (!settings.workspace) return '';
+  try {
+    const stat = await fs.stat(settings.workspace);
+    return stat.isDirectory() ? await fs.realpath(settings.workspace) : '';
+  } catch {
+    return '';
+  }
+}
+
+async function resolveInWorkspace(workspace, requested, allowMissing) {
+  const raw = String(requested || '').trim();
+  if (!raw || path.isAbsolute(raw) || raw.split(/[\\/]+/).includes('..')) {
+    throw new Error('Путь должен быть относительным и не выходить за пределы workspace.');
+  }
+  const target = path.resolve(workspace, raw);
+  const relative = path.relative(workspace, target);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error('Путь выходит за пределы workspace.');
+  }
+  if (allowMissing) {
+    try { await fs.access(target); } catch { return target; }
+  }
+  const real = await fs.realpath(target);
+  if (real !== workspace && !real.startsWith(`${workspace}${path.sep}`)) {
+    throw new Error('Символическая ссылка выходит за пределы workspace.');
+  }
+  return real;
+}
+
+function diffPreview(before, after) {
+  const a = String(before).split('\n').slice(0, 150);
+  const b = String(after).split('\n').slice(0, 150);
+  return [...a.map((l) => `- ${l}`), ...b.map((l) => `+ ${l}`)].join('\n');
+}
+
+function runCommand(command, cwd, signal) {
+  return new Promise((resolve) => {
+    const child = spawn('/bin/bash', ['-lc', command], {
+      cwd,
+      env: { PATH: process.env.PATH || '/usr/bin:/bin', HOME: cwd, PWD: cwd, TERM: 'dumb' },
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    let output = '';
+    const append = (chunk) => { if (output.length < 100_000) output += chunk.toString(); };
+    child.stdout.on('data', append);
+    child.stderr.on('data', append);
+    const timer = setTimeout(() => child.kill('SIGTERM'), 120_000);
+    const onAbort = () => child.kill('SIGTERM');
+    signal?.addEventListener('abort', onAbort, { once: true });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      resolve({ ok: code === 0, text: output || `(код завершения ${code})` });
+    });
+    child.on('error', (error) => {
+      clearTimeout(timer);
+      resolve({ ok: false, text: error.message });
+    });
+  });
+}
+
+function commandLooksSafe(command) {
+  const v = String(command || '').trim();
+  if (!v || v.length > 8000) return false;
+  if (/(^|[\s;&|])(cd|pushd|popd|sudo|ssh|scp|curl|wget|nc|telnet)\b/i.test(v)) return false;
+  return true;
+}
+
+function waitForApproval(sender, requestId, tool) {
+  return new Promise((resolve) => {
+    const approvalId = `${requestId}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+    const timer = setTimeout(() => { pendingApprovals.delete(approvalId); resolve(false); }, 10 * 60 * 1000);
+    pendingApprovals.set(approvalId, {
+      resolve: (approved) => { clearTimeout(timer); pendingApprovals.delete(approvalId); resolve(approved === true); }
+    });
+    sender.send('agent:event', { requestId, type: 'approval', approvalId, tool });
+  });
+}
+
+async function executeTool(sender, requestId, workspace, call, signal) {
+  const name = call.function?.name;
+  let args;
+  try { args = JSON.parse(call.function?.arguments || '{}'); } catch { return { ok: false, text: 'Некорректные JSON-аргументы инструмента.' }; }
+
+  const mutating = ['write_file', 'edit_file', 'run_command'].includes(name);
+  const preview = { name, path: args.path || '', command: args.command || '', diff: '' };
+
+  try {
+    if (name === 'write_file') {
+      const target = await resolveInWorkspace(workspace, args.path, true);
+      let previous = '';
+      try { previous = await fs.readFile(target, 'utf8'); } catch { /* new file */ }
+      preview.diff = diffPreview(previous, String(args.content || ''));
+    } else if (name === 'edit_file') {
+      const target = await resolveInWorkspace(workspace, args.path, false);
+      const previous = await fs.readFile(target, 'utf8');
+      preview.diff = diffPreview(previous, previous.replace(String(args.old || ''), String(args.new || '')));
+    }
+  } catch (error) {
+    return { ok: false, text: error.message };
+  }
+
+  sender.send('agent:event', { requestId, type: 'tool', callId: call.id, tool: preview });
+
+  if (mutating) {
+    const approved = await waitForApproval(sender, requestId, preview);
+    if (!approved) {
+      const result = { ok: false, text: 'Пользователь отклонил действие.' };
+      sender.send('agent:event', { requestId, type: 'result', callId: call.id, ...result });
+      return result;
+    }
+  }
+
+  try {
+    let result;
+    if (name === 'read_file') {
+      const target = await resolveInWorkspace(workspace, args.path, false);
+      const stat = await fs.stat(target);
+      if (stat.size > 1_000_000) throw new Error('Файл слишком большой для чтения.');
+      result = { ok: true, text: await fs.readFile(target, 'utf8') };
+    } else if (name === 'list_dir') {
+      const target = await resolveInWorkspace(workspace, args.path || '.', false);
+      const entries = await fs.readdir(target, { withFileTypes: true });
+      result = { ok: true, text: entries.slice(0, 400).map((e) => `${e.isDirectory() ? 'dir ' : 'file'} ${e.name}`).join('\n') || '(пусто)' };
+    } else if (name === 'write_file') {
+      const target = await resolveInWorkspace(workspace, args.path, true);
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      await fs.writeFile(target, String(args.content || ''), 'utf8');
+      result = { ok: true, text: `Записан файл ${args.path}.` };
+    } else if (name === 'edit_file') {
+      const target = await resolveInWorkspace(workspace, args.path, false);
+      const previous = await fs.readFile(target, 'utf8');
+      const oldText = String(args.old || '');
+      if (!oldText) throw new Error('Параметр old не может быть пустым.');
+      const count = previous.split(oldText).length - 1;
+      if (count !== 1) throw new Error(`Ожидалось ровно одно совпадение old, найдено: ${count}.`);
+      await fs.writeFile(target, previous.replace(oldText, String(args.new || '')), 'utf8');
+      result = { ok: true, text: `Изменён файл ${args.path}.` };
+    } else if (name === 'run_command') {
+      if (!commandLooksSafe(args.command)) throw new Error('Команда отклонена (сеть/sudo/выход из workspace запрещены).');
+      result = await runCommand(args.command, workspace, signal);
+    } else {
+      throw new Error(`Неизвестный инструмент: ${name}.`);
+    }
+    sender.send('agent:event', { requestId, type: 'result', callId: call.id, ...result });
+    return result;
+  } catch (error) {
+    const result = { ok: false, text: error.message };
+    sender.send('agent:event', { requestId, type: 'result', callId: call.id, ...result });
+    return result;
+  }
+}
+
+async function requestAgentTurn(sender, agent) {
+  const key = await gatewayKey();
+  if (!key) throw new Error('API ключ не найден.');
+
+  const response = await fetch(CHAT_URL, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: agent.model, messages: agent.messages, tools: AGENT_TOOLS, tool_choice: 'auto', stream: true }),
+    signal: agent.controller.signal
+  });
+
+  if (!response.ok) throw new Error(errorMessageFromBody(await response.text(), `Gateway error: HTTP ${response.status}`));
+  if (!response.body) throw new Error('Gateway не открыл поток ответа.');
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let done = false;
+  let content = '';
+  const calls = new Map();
+
+  while (!done) {
+    const { value, done: readerDone } = await reader.read();
+    if (readerDone) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split(/\r?\n/);
+    buffer = lines.pop() || '';
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line.startsWith('data:')) continue;
+      const payload = line.slice(5).trim();
+      if (payload === '[DONE]') { done = true; break; }
+      let chunk;
+      try { chunk = JSON.parse(payload); } catch { continue; }
+      if (chunk?.error) throw new Error(String(chunk.error.message || chunk.error));
+      const delta = chunk?.choices?.[0]?.delta || {};
+      if (typeof delta.content === 'string' && delta.content) {
+        content += delta.content;
+        sender.send('chat:event', { requestId: agent.requestId, type: 'text', text: delta.content });
+      }
+      for (const partial of delta.tool_calls || []) {
+        const index = Number.isInteger(partial.index) ? partial.index : calls.size;
+        const call = calls.get(index) || { id: '', type: 'function', function: { name: '', arguments: '' } };
+        if (partial.id) call.id += partial.id;
+        if (partial.function?.name) call.function.name += partial.function.name;
+        if (partial.function?.arguments) call.function.arguments += partial.function.arguments;
+        calls.set(index, call);
+      }
+    }
+  }
+
+  return { content, toolCalls: [...calls.values()].filter((c) => c.function.name) };
+}
+
+async function runAgent(event, request) {
+  const requestId = String(request.requestId || '');
+  const workspace = await workspacePath();
+  event.sender.send('chat:event', { requestId, type: 'thinking' });
+
+  if (!workspace) {
+    event.sender.send('chat:event', { requestId, type: 'error', message: 'Выберите workspace в Settings перед включением Agent mode.' });
+    event.sender.send('chat:event', { requestId, type: 'done' });
+    return;
+  }
+
+  const controller = new AbortController();
+  const agent = { requestId, model: MODELS.includes(request.model) ? request.model : MODELS[0], messages: cleanMessages(request.messages), controller };
+  activeAgents.set(requestId, agent);
+  event.sender.send('agent:event', { requestId, type: 'workspace', workspace });
+
+  let step = 0;
+  try {
+    while (!controller.signal.aborted && step < 25) {
+      step += 1;
+      const turn = await requestAgentTurn(event.sender, agent);
+      if (!turn.toolCalls.length) {
+        if (!turn.content) event.sender.send('chat:event', { requestId, type: 'error', message: 'пустой ответ — лимит/таймаут' });
+        break;
+      }
+      agent.messages.push({ role: 'assistant', content: turn.content || null, tool_calls: turn.toolCalls });
+      for (const call of turn.toolCalls) {
+        if (controller.signal.aborted) break;
+        const result = await executeTool(event.sender, requestId, workspace, call, controller.signal);
+        agent.messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) });
+      }
+    }
+    if (step >= 25 && !controller.signal.aborted) {
+      event.sender.send('chat:event', { requestId, type: 'error', message: 'Agent достиг лимита в 25 шагов.' });
+    }
+  } catch (error) {
+    if (!controller.signal.aborted) {
+      event.sender.send('chat:event', { requestId, type: 'error', message: String(error.message || error) });
+    }
+  } finally {
+    activeAgents.delete(requestId);
+    event.sender.send('chat:event', { requestId, type: 'done' });
+  }
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1320,
@@ -459,6 +723,14 @@ function createWindow() {
       sandbox: true,
       webSecurity: true
     }
+  });
+
+  mainWindow.webContents.on('console-message', (event) => {
+    const { message, lineNumber, sourceId } = event;
+    console.log(`[renderer] ${sourceId}:${lineNumber} ${message}`);
+  });
+  mainWindow.webContents.on('render-process-gone', (_e, details) => {
+    console.log('[renderer] CRASHED', JSON.stringify(details));
   });
 
   mainWindow.loadFile(path.join(__dirname, '../assets/index.html'));
@@ -590,7 +862,34 @@ ipcMain.handle('chat:start', async (event, request) => {
 ipcMain.handle('chat:stop', async (_event, requestId) => {
   const controller = activeRequests.get(String(requestId));
   if (controller) controller.abort();
-  return Boolean(controller);
+  const agent = activeAgents.get(String(requestId));
+  if (agent) agent.controller.abort();
+  return Boolean(controller || agent);
+});
+
+ipcMain.handle('agent:start', async (event, request) => {
+  runAgent(event, request).catch((error) => {
+    event.sender.send('chat:event', { requestId: request.requestId, type: 'error', message: String(error.message || error) });
+    event.sender.send('chat:event', { requestId: request.requestId, type: 'done' });
+  });
+  return true;
+});
+
+ipcMain.handle('agent:approve', async (_event, approvalId, approved) => {
+  const pending = pendingApprovals.get(String(approvalId));
+  if (pending) pending.resolve(approved === true);
+  return Boolean(pending);
+});
+
+ipcMain.handle('workspace:get', async () => ({ path: await workspacePath() }));
+
+ipcMain.handle('workspace:pick', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, { title: 'Select workspace', properties: ['openDirectory', 'createDirectory'] });
+  if (result.canceled || !result.filePaths[0]) return { canceled: true, path: await workspacePath() };
+  const selected = await fs.realpath(result.filePaths[0]);
+  const settings = await readJson('settings.json', {});
+  await writeJson('settings.json', { ...settings, workspace: selected });
+  return { canceled: false, path: selected };
 });
 
 ipcMain.handle('gateway:ensure', ensureGateway);
