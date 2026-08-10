@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, dialog, shell, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu, screen } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs/promises');
 const os = require('node:os');
@@ -705,9 +705,17 @@ async function runAgent(event, request) {
 }
 
 function createWindow() {
+  const workArea = screen.getPrimaryDisplay().workArea;
+  const width = Math.min(1320, workArea.width - 40);
+  const height = Math.min(860, workArea.height - 40);
+  const x = workArea.x + Math.round((workArea.width - width) / 2);
+  const y = workArea.y + Math.round((workArea.height - height) / 2);
+
   mainWindow = new BrowserWindow({
-    width: 1320,
-    height: 860,
+    x,
+    y,
+    width,
+    height,
     minWidth: 940,
     minHeight: 620,
     title: 'Codexarion',
@@ -723,6 +731,16 @@ function createWindow() {
       sandbox: true,
       webSecurity: true
     }
+  });
+
+  mainWindow.on('show', () => {
+    const visible = screen.getDisplayMatching(mainWindow.getBounds());
+    const bounds = mainWindow.getBounds();
+    const inside = bounds.x >= visible.workArea.x - 20 &&
+      bounds.y >= visible.workArea.y - 20 &&
+      bounds.x + bounds.width <= visible.workArea.x + visible.workArea.width + 20 &&
+      bounds.y + bounds.height <= visible.workArea.y + visible.workArea.height + 20;
+    if (!inside) mainWindow.center();
   });
 
   mainWindow.webContents.on('console-message', (event) => {
