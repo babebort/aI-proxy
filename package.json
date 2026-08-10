@@ -1,0 +1,24 @@
+{
+  "name": "codexarion",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Codexarion — desktop chat over the local codexer gateway",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^43.3.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.bortnik.codexarion.app",
+    "productName": "Codexarion",
+    "files": ["src/**/*", "package.json"],
+    "mac": {
+      "target": "dir",
+      "category": "public.app-category.developer-tools"
+    }
+  }
+}
