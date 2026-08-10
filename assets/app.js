@@ -202,7 +202,9 @@ function renderHeader() {
 
 function messageTools(message, index) {
   const buttons = [`<button data-copy="${index}">Copy</button>`];
-  if (message.role === 'assistant' && !message.error) buttons.push(`<button data-regenerate="${index}">Regenerate</button>`);
+  if (message.role === 'assistant') {
+    buttons.push(`<button data-regenerate="${index}">${message.error ? 'Retry' : 'Regenerate'}</button>`);
+  }
   if (message.role === 'user') buttons.push(`<button data-edit="${index}">Edit</button>`);
   return `<div class="message-tools">${buttons.join('')}</div>`;
 }
