@@ -751,7 +751,11 @@ function createWindow() {
     console.log('[renderer] CRASHED', JSON.stringify(details));
   });
 
-  mainWindow.loadFile(path.join(__dirname, '../assets/index.html'));
+  // file:// assets can otherwise be served from Chromium's persistent HTTP
+  // cache across relaunches, silently masking CSS/JS edits during development.
+  mainWindow.webContents.session.clearCache().finally(() => {
+    mainWindow.loadFile(path.join(__dirname, '../assets/index.html'));
+  });
 }
 
 function appMenu() {
