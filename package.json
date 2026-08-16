@@ -21,7 +21,7 @@
   "private": true,
   "dependencies": {
     "commander": "^14.0.0",
-    "yaml": "^2.8.1"
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",
