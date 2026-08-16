@@ -117,8 +117,7 @@ anthropicCmd
       const code = await runInteractive(binary, ['login']);
       process.exit(code);
     } catch {
-      console.error('tcr not installed. Install teamclaude-rs, then re-run login.');
-      console.error('  curl --proto \'=https\' --tlsv1.2 -LsSf https://github.com/dhkts1/teamclaude-rs/releases/latest/download/teamclaude-rs-installer.sh | sh');
+      console.error('tcr not found. Run: npm run install-binaries');
       process.exit(1);
     }
   });

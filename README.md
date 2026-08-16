@@ -32,7 +32,7 @@
 git clone git@github.com:babebort/aI-proxy.git
 cd aI-proxy
 
-npm run setup    # install + build TS + go build codexer
+npm run setup    # install + build TS + codexer + tcr (login helper)
 ```
 
 Или по шагам:
@@ -40,7 +40,7 @@ npm run setup    # install + build TS + go build codexer
 ```bash
 npm install
 npm run build
-npm run install-binaries   # go build codexer/ → resources/bin/codexer
+npm run install-binaries   # codexer + tcr → resources/bin/
 ```
 
 ### 2. OpenAI — добавить ChatGPT-аккаунты
@@ -54,12 +54,9 @@ npx ai-proxy openai login    # второй аккаунт, третий…
 
 ### 3. Anthropic — добавить Claude-аккаунты
 
-Для OAuth нужен [teamclaude-rs](https://github.com/dhkts1/teamclaude-rs) — только на этапе login:
+`tcr` (teamclaude-rs) ставится автоматически на шаге `npm run setup` — отдельно ничего качать не нужно.
 
 ```bash
-curl --proto '=https' --tlsv1.2 -LsSf \
-  https://github.com/dhkts1/teamclaude-rs/releases/latest/download/teamclaude-rs-installer.sh | sh
-
 npx ai-proxy anthropic login
 npx ai-proxy anthropic login    # ещё аккаунты
 npx ai-proxy anthropic accounts # список
@@ -134,6 +131,7 @@ aI-proxy/
 ├── codexer/                 # vendored OpenAI proxy (Go)
 ├── src/                     # unified Node server
 ├── resources/bin/codexer    # built binary (gitignored)
+├── resources/bin/tcr        # teamclaude-rs login helper (gitignored)
 ~/.config/codexer/config.yml # OpenAI аккаунты
 ~/.config/teamclaude.json    # Anthropic аккаунты
 ```
@@ -145,7 +143,7 @@ aI-proxy/
 | Проблема | Решение |
 |----------|---------|
 | `codexer not found` | `npm run install-binaries` (нужен Go) |
-| `tcr not found` | установи teamclaude-rs, нужен только для `anthropic login` |
+| `tcr not found` | `npm run install-binaries` (или `npm run setup`) |
 | 401 на OpenAI | `npx ai-proxy openai login` |
 | 429 при одном аккаунте | добавь второй: `openai login` / `anthropic login` |
 | Пустой Anthropic pool | `npx ai-proxy anthropic login` |
