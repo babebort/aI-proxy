@@ -13,7 +13,7 @@ export function bundledBinDir(): string {
 }
 
 export function defaultCodexerConfig(): string {
-  return path.join(homedir(), 'codexer', 'config.yml');
+  return path.join(homedir(), '.config', 'codexer', 'config.yml');
 }
 
 export function defaultAnthropicConfig(): string {

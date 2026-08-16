@@ -12,6 +12,8 @@ export interface AnthropicAccount {
 export interface AnthropicPoolConfig {
   upstream: string;
   switchThreshold: number;
+  /** Pin conversations to one account for prompt cache (default true). */
+  sessionAffinity?: boolean;
   accounts: AnthropicAccount[];
 }
 

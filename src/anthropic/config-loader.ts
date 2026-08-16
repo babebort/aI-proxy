@@ -11,6 +11,7 @@ export async function loadAnthropicPool(configFile: string): Promise<AnthropicPo
     typeof raw.switchThreshold === 'number' && raw.switchThreshold > 0
       ? raw.switchThreshold
       : 0.95;
+  const sessionAffinity = raw.sessionAffinity !== false;
   const accounts: AnthropicPoolConfig['accounts'] = [];
   if (Array.isArray(raw.accounts)) {
     for (const item of raw.accounts) {
@@ -36,6 +37,7 @@ export async function loadAnthropicPool(configFile: string): Promise<AnthropicPo
   return {
     upstream: upstream.replace(/\/$/, ''),
     switchThreshold,
+    sessionAffinity,
     accounts,
   };
 }

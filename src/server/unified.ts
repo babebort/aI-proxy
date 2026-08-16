@@ -1,5 +1,4 @@
 import { createServer, type Server } from 'node:http';
-import { loadAnthropicPool } from '../anthropic/config-loader.js';
 import { handleAnthropicProxy } from '../anthropic/proxy.js';
 import { forwardToCodexer, isOpenAiRoute } from '../openai/forward.js';
 
@@ -23,8 +22,7 @@ export function startUnifiedServer(options: UnifiedServerOptions): Server {
       }
 
       if (url.startsWith('/v1/messages') || url.startsWith('/api/v1/messages')) {
-        const pool = await loadAnthropicPool(state.anthropicConfigFile);
-        await handleAnthropicProxy(req, res, pool);
+        await handleAnthropicProxy(req, res, state.anthropicConfigFile);
         return;
       }
 

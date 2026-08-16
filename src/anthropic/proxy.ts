@@ -2,9 +2,9 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { URL } from 'node:url';
-import type { AnthropicPoolConfig } from './types.js';
+import { loadAccountManager } from './account-manager.js';
 import { RETRY_STATUS } from './types.js';
-import { AccountPool } from './pool.js';
+import { extractSessionKey } from './session.js';
 
 const HOP_BY_HOP = new Set([
   'connection',
@@ -22,7 +22,7 @@ const HOP_BY_HOP = new Set([
 export async function handleAnthropicProxy(
   req: IncomingMessage,
   res: ServerResponse,
-  poolConfig: AnthropicPoolConfig,
+  configFile: string,
 ): Promise<void> {
   if (req.method !== 'POST') {
     res.writeHead(405, { 'content-type': 'application/json' });
@@ -30,8 +30,8 @@ export async function handleAnthropicProxy(
     return;
   }
 
-  const pool = new AccountPool(poolConfig.accounts);
-  if (pool.size() === 0) {
+  const manager = await loadAccountManager(configFile);
+  if (manager.size() === 0) {
     res.writeHead(503, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ error: { message: 'no anthropic accounts configured' } }));
     return;
@@ -39,16 +39,33 @@ export async function handleAnthropicProxy(
 
   const body = await readBody(req);
   const path = normalizeAnthropicPath(req.url ?? '/');
+  const sessionKey = extractSessionKey(body);
+  const poolConfig = manager.config;
   let skipName: string | undefined;
-  const attempts = Math.min(pool.size(), 4);
+  const attempts = Math.min(manager.size(), 4);
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const account = pool.next(skipName);
+    const account = manager.select(sessionKey, skipName);
     if (!account) {
       break;
     }
     skipName = account.name;
-    const upstream = await forwardOnce(poolConfig.upstream, path, req.headers, body, account.accessToken);
+
+    const token = await manager.accessTokenFor(account);
+    if (!token) {
+      continue;
+    }
+
+    const upstream = await forwardOnce(poolConfig.upstream, path, req.headers, body, token);
+
+    manager.updateQuotaFromResponse(account.name, upstream.headers);
+    if (upstream.status === 429) {
+      manager.markRateLimited(account.name, parseRetryAfter(upstream.headers));
+    } else if (upstream.status >= 200 && upstream.status < 300) {
+      manager.clearRateLimited(account.name);
+      manager.pinSession(sessionKey, account.name);
+    }
+
     if (!RETRY_STATUS.has(upstream.status) || attempt === attempts - 1) {
       writeUpstreamResponse(res, upstream);
       return;
@@ -57,6 +74,16 @@ export async function handleAnthropicProxy(
 
   res.writeHead(502, { 'content-type': 'application/json' });
   res.end(JSON.stringify({ error: { message: 'all anthropic accounts rejected the request' } }));
+}
+
+function parseRetryAfter(headers: Record<string, string | string[]>): number {
+  const raw = headers['retry-after'];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (!value) {
+    return 60;
+  }
+  const seconds = Number.parseInt(value, 10);
+  return Number.isFinite(seconds) ? seconds : 60;
 }
 
 function normalizeAnthropicPath(url: string): string {

@@ -29,7 +29,7 @@ const program = new Command();
 program
   .name('ai-proxy')
   .description('Unified local proxy: OpenAI (codexer) + Anthropic (native pool) on one port')
-  .version('0.2.0');
+  .version('0.3.0');
 
 program
   .command('start')
