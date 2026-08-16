@@ -123,6 +123,44 @@ export async function readCodexerGroupApi(configFile: string): Promise<string | 
   }
 }
 
+export interface CodexerAccount {
+  groupName: string;
+  gid: string;
+  uuid: string;
+  alias: string;
+  hasToken: boolean;
+}
+
+export async function loadCodexerAccounts(configFile: string): Promise<CodexerAccount[]> {
+  const text = await fs.readFile(configFile, 'utf8');
+  const doc = parse(text) as {
+    groups?: Array<{
+      gname?: string;
+      gid?: string;
+      users?: Array<{
+        uuid?: string;
+        alias?: string;
+        tokens?: { access_token?: string };
+      }>;
+    }>;
+  };
+  const accounts: CodexerAccount[] = [];
+  for (const group of doc.groups ?? []) {
+    const groupName = group.gname ?? '';
+    const gid = group.gid ?? '';
+    for (const user of group.users ?? []) {
+      accounts.push({
+        groupName,
+        gid,
+        uuid: user.uuid ?? '',
+        alias: user.alias ?? '',
+        hasToken: Boolean(user.tokens?.access_token),
+      });
+    }
+  }
+  return accounts;
+}
+
 export async function ensureAnthropicConfig(configFile: string, apiKey: string | null): Promise<void> {
   try {
     await fs.access(configFile);

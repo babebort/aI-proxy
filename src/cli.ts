@@ -8,6 +8,7 @@ import {
   ensureConfig,
   loadConfig,
   readCodexerGroupApi,
+  loadCodexerAccounts,
 } from './config.js';
 import { resolveCodexer, resolveTeamclaude } from './binaries.js';
 import { probeHttp, waitForUp } from './health.js';
@@ -103,6 +104,35 @@ openaiCmd
     const config = await ensureConfig();
     const groupApi = (await readCodexerGroupApi(config.openai.configFile)) ?? config.openai.apiKey;
     console.log(groupApi ?? '(no key — run openai login first)');
+  });
+
+function printOpenAiAccounts(configFile: string): Promise<void> {
+  return loadCodexerAccounts(configFile)
+    .then((accounts) => {
+      if (accounts.length === 0) {
+        console.log('No accounts. Run: ai-proxy openai login');
+        return;
+      }
+      console.log('group\tgid\tuuid\talias\ttoken');
+      for (const account of accounts) {
+        const token = account.hasToken ? 'yes' : 'no';
+        console.log(
+          `${account.groupName}\t${account.gid}\t${account.uuid}\t${account.alias}\t${token}`,
+        );
+      }
+    })
+    .catch(() => {
+      console.log('No config yet. Run: ai-proxy openai login');
+    });
+}
+
+openaiCmd
+  .command('accounts')
+  .alias('list')
+  .description('List ChatGPT OAuth accounts in ~/.config/codexer/config.yml')
+  .action(async () => {
+    const config = await loadConfig();
+    await printOpenAiAccounts(config.openai.configFile);
   });
 
 const anthropicCmd = program.command('anthropic').description('Anthropic / Claude OAuth pool');

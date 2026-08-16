@@ -102,7 +102,7 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:8787
 ```
 ai-proxy start [--foreground] [--legacy]
 ai-proxy stop | status | env
-ai-proxy openai login | key
+ai-proxy openai login | accounts | list | key
 ai-proxy anthropic login | accounts
 ```
 
