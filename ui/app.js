@@ -225,9 +225,10 @@ function renderAnthropicAccounts(statusAccounts, probeAccounts) {
       const disabled = account.disabled;
       const spinning = probingAccounts.has(`anthropic:${account.name}`);
       const pending = pendingProbeKeys.has(`anthropic:${account.name}`);
+      const hasUnifiedQuota = Boolean(probe?.quota?.fiveHour || probe?.quota?.sevenDay);
       const badge = disabled
         ? '<span class="badge no">disabled</span>'
-        : probe?.ok
+        : probe?.ok || hasUnifiedQuota
           ? '<span class="badge ok">live</span>'
           : probe?.error
             ? `<span class="badge no" title="${esc(probe.error)}">err</span>`
@@ -236,24 +237,30 @@ function renderAnthropicAccounts(statusAccounts, probeAccounts) {
               : '<span class="badge pending">new</span>';
 
       let quotaHtml = '';
-      if (probe?.ok && probe.quota) {
-        const q = probe.quota;
-        if (q.fiveHour) {
+      const quota = probe?.quota;
+      const hasQuota =
+        quota &&
+        (quota.fiveHour ||
+          quota.sevenDay ||
+          quota.tokensLimit !== undefined ||
+          quota.requestsLimit !== undefined);
+      if (hasQuota) {
+        if (quota.fiveHour) {
           quotaHtml += quotaBar(
-            (q.fiveHour.utilization ?? 0) * 100,
+            (quota.fiveHour.utilization ?? 0) * 100,
             '5 часов',
-            formatReset(q.fiveHour.resetMs ? Math.floor(q.fiveHour.resetMs / 1000) : undefined),
+            formatReset(quota.fiveHour.resetMs ? Math.floor(quota.fiveHour.resetMs / 1000) : undefined),
           );
         }
-        if (q.sevenDay) {
+        if (quota.sevenDay) {
           quotaHtml += quotaBar(
-            (q.sevenDay.utilization ?? 0) * 100,
+            (quota.sevenDay.utilization ?? 0) * 100,
             '7 дней',
-            formatReset(q.sevenDay.resetMs ? Math.floor(q.sevenDay.resetMs / 1000) : undefined),
+            formatReset(quota.sevenDay.resetMs ? Math.floor(quota.sevenDay.resetMs / 1000) : undefined),
           );
         }
-        if (!q.fiveHour && !q.sevenDay) {
-          quotaHtml = '<p class="muted small">Probe OK, но headers пустые (ещё не было запросов?)</p>';
+        if (!quota.fiveHour && !quota.sevenDay) {
+          quotaHtml = '<p class="muted small">Probe OK, но unified headers пустые</p>';
         }
       } else if (probe?.error) {
         quotaHtml = `<p class="muted small err">${esc(probe.error)}</p>`;
