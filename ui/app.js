@@ -508,6 +508,10 @@ async function stopProxy() {
 
 async function login(kind) {
   if (kind === 'openai') {
+    if (!document.getElementById('oauth-modal')) {
+      toast('Старый UI в кеше — Cmd+Shift+R');
+      return;
+    }
     openOAuthModal();
     return;
   }
@@ -715,7 +719,18 @@ function initOAuthModal() {
 
 function initPwa() {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js').catch(() => {});
+    void navigator.serviceWorker.getRegistrations().then((regs) => {
+      for (const reg of regs) {
+        void reg.unregister();
+      }
+    });
+  }
+  if ('caches' in window) {
+    void caches.keys().then((keys) => Promise.all(keys.map((key) => caches.delete(key))));
+  }
+
+  if (!document.getElementById('oauth-modal')) {
+    toast('Старый UI в кеше — Cmd+Shift+R');
   }
 
   window.addEventListener('beforeinstallprompt', (event) => {

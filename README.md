@@ -204,6 +204,7 @@ aI-proxy/
 |----------|---------|
 | `codexer not found` | `npm run install-binaries` |
 | UI не открылся | `open http://127.0.0.1:8790` или `npm run open` |
+| **«+ Добавить» ничего не делает** / toast про API | **Cmd+Shift+R** (старый JS в PWA-кеше). Или `npm run build && npm run stop && npm start`, затем hard refresh |
 | **Ctrl+C не гасит** / завис терминал | `npm run stop` или `npm run stop -- --all` (не нужен Ctrl+C — `npm start` уже в фоне) |
 | Жёстко убить порты | `lsof -ti tcp:8790,8787,9090 \| xargs kill -9` |
 | **`missing chatgpt account id`** | **↺ Reauth** на карточке → OAuth в UI → тот же alias |

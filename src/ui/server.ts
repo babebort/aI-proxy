@@ -56,7 +56,13 @@ async function serveStatic(urlPath: string, res: ServerResponse): Promise<boolea
   try {
     const data = await fs.readFile(filePath);
     const ext = path.extname(filePath);
-    res.writeHead(200, { 'content-type': MIME[ext] ?? 'application/octet-stream' });
+    const headers: Record<string, string> = {
+      'content-type': MIME[ext] ?? 'application/octet-stream',
+    };
+    if (ext === '.html' || ext === '.js' || ext === '.css') {
+      headers['cache-control'] = 'no-store';
+    }
+    res.writeHead(200, headers);
     res.end(data);
     return true;
   } catch {
@@ -187,8 +193,11 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): P
   }
 
   if (req.method === 'POST' && url.pathname === '/api/login/openai') {
-    json(res, 410, {
-      error: 'use POST /api/login/openai/begin for in-app OAuth',
+    json(res, 200, {
+      staleUi: true,
+      inApp: true,
+      error:
+        'Старый UI в кеше. Обнови страницу: Cmd+Shift+R (или DevTools → Application → Unregister service worker).',
     });
     return true;
   }
