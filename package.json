@@ -1,23 +1,24 @@
 {
   "name": "ai-proxy",
-  "version": "0.3.0",
-  "description": "Unified local proxy: OpenAI (codexer) + Anthropic (native pool) on one port.",
+  "version": "0.4.0",
+  "description": "Unified local proxy with browser control panel (OpenAI codexer + Anthropic pool).",
   "type": "module",
   "bin": {
-    "ai-proxy": "./dist/cli.js"
+    "ai-proxy": "./dist/main.js"
   },
   "scripts": {
-    "build": "tsc && chmod +x dist/cli.js",
-    "build:codexer": "go build -C codexer -o resources/bin/codexer .",
-    "start": "node dist/cli.js start --foreground",
-    "dev": "node --experimental-transform-types src/cli.ts",
-    "test": "npm run build && node --test dist/**/*.test.js",
+    "compile": "tsc && chmod +x dist/main.js dist/stop.js",
+    "build": "npm run compile",
+    "start": "node dist/main.js",
+    "stop": "node dist/stop.js",
+    "open": "node dist/main.js --open-only",
+    "dev": "node --experimental-transform-types src/main.ts",
+    "test": "npm run compile && node --test dist/**/*.test.js",
     "install-binaries": "bash scripts/install-binaries.sh",
     "link-bin": "bash scripts/link-local-bin.sh",
-    "setup": "npm install && npm run build && npm run install-binaries && npm run link-bin",
-    "openai:login": "node dist/cli.js openai login",
-    "anthropic:login": "node dist/cli.js anthropic login",
-    "prepack": "npm run build"
+    "install-app": "bash scripts/install-macos-app.sh",
+    "setup": "npm install && npm run compile && npm run install-binaries && npm run link-bin",
+    "prepack": "npm run compile"
   },
   "engines": {
     "node": ">=22"
@@ -25,7 +26,6 @@
   "license": "MIT",
   "private": true,
   "dependencies": {
-    "commander": "^15.0.0",
     "yaml": "^2.9.0"
   },
   "devDependencies": {

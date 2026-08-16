@@ -3,6 +3,7 @@ node_modules/
 dist/
 release/
 out/
+build/
 *.tsbuildinfo
 
 # Bundled backends (populated by scripts/install-binaries.sh)

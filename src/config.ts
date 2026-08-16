@@ -7,6 +7,7 @@ import {
   defaultCodexerConfig,
   supervisorConfigPath,
 } from './paths.js';
+import { parseOpenAiJwtMeta } from './openai/jwt-meta.js';
 
 export interface OpenAiConfig {
   port: number;
@@ -129,6 +130,8 @@ export interface CodexerAccount {
   uuid: string;
   alias: string;
   hasToken: boolean;
+  email?: string;
+  planType?: string;
 }
 
 export async function loadCodexerAccounts(configFile: string): Promise<CodexerAccount[]> {
@@ -140,7 +143,7 @@ export async function loadCodexerAccounts(configFile: string): Promise<CodexerAc
       users?: Array<{
         uuid?: string;
         alias?: string;
-        tokens?: { access_token?: string };
+        tokens?: { access_token?: string; id_token?: string };
       }>;
     }>;
   };
@@ -149,12 +152,15 @@ export async function loadCodexerAccounts(configFile: string): Promise<CodexerAc
     const groupName = group.gname ?? '';
     const gid = group.gid ?? '';
     for (const user of group.users ?? []) {
+      const meta = parseOpenAiJwtMeta(user.tokens?.id_token ?? user.tokens?.access_token);
       accounts.push({
         groupName,
         gid,
         uuid: user.uuid ?? '',
         alias: user.alias ?? '',
         hasToken: Boolean(user.tokens?.access_token),
+        email: meta.email,
+        planType: meta.planType,
       });
     }
   }

@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AI Proxy</title>
+  <meta name="theme-color" content="#6d5efc">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="AI Proxy">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/icon.svg">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div id="install-banner" class="install-banner hidden">
+    <span>Установи как приложение — иконка в Dock / Launchpad</span>
+    <div class="install-actions">
+      <button type="button" id="btn-install" class="primary">Установить</button>
+      <button type="button" id="install-dismiss" class="ghost">×</button>
+    </div>
+  </div>
+  <aside class="sidebar">
+    <div class="brand-row">
+      <div class="brand"><span class="brand-mark">◈</span><span>AI Proxy</span></div>
+      <span id="refresh-dot" class="status-dot" title="Статус"></span>
+    </div>
+
+    <nav class="nav">
+      <button type="button" class="nav-item" data-panel="overview">Обзор</button>
+      <button type="button" class="nav-item active" data-panel="accounts">Аккаунты</button>
+      <button type="button" class="nav-item" data-panel="env">Клиенты</button>
+    </nav>
+
+    <div class="sidebar-bottom">
+      <button type="button" id="theme-toggle" title="Тема">◐ Тема</button>
+      <span class="hint">127.0.0.1 · локально</span>
+    </div>
+  </aside>
+
+  <main class="workspace">
+    <header class="topbar">
+      <h1 id="panel-title">Аккаунты</h1>
+      <div class="topbar-actions">
+        <button type="button" id="btn-probe" class="primary">Обновить лимиты</button>
+        <button type="button" id="btn-start">Запустить</button>
+        <button type="button" id="btn-stop">Стоп</button>
+        <button type="button" id="btn-refresh" title="Статус">↻</button>
+      </div>
+    </header>
+
+    <section id="panel-overview" class="panel hidden">
+      <div class="cards">
+        <article class="card">
+          <h2>Unified proxy</h2>
+          <p id="unified-status" class="status-line">…</p>
+          <code id="unified-url" class="mono"></code>
+        </article>
+        <article class="card">
+          <h2>Codexer (OpenAI)</h2>
+          <p id="codexer-status" class="status-line">…</p>
+          <code id="codexer-url" class="mono"></code>
+        </article>
+        <article class="card">
+          <h2>Anthropic pool</h2>
+          <p id="anthropic-status" class="status-line">…</p>
+        </article>
+      </div>
+      <p class="muted" id="config-path"></p>
+    </section>
+
+    <section id="panel-accounts" class="panel">
+      <p id="probe-meta" class="muted">Нажми «Обновить лимиты» — подтянет quota с ChatGPT и Claude.</p>
+
+      <div class="provider-block">
+        <div class="section-head">
+          <div>
+            <h2>OpenAI / ChatGPT Codex</h2>
+            <p class="muted">OAuth через codexer · ротация при 429</p>
+          </div>
+          <button type="button" id="btn-openai-login" class="secondary">+ Добавить аккаунт</button>
+        </div>
+        <div id="openai-accounts" class="account-grid"></div>
+      </div>
+
+      <div class="provider-block">
+        <div class="section-head">
+          <div>
+            <h2>Anthropic / Claude</h2>
+            <p class="muted">OAuth pool · 5h / 7d windows</p>
+          </div>
+          <button type="button" id="btn-anthropic-login" class="secondary">+ Добавить аккаунт</button>
+        </div>
+        <div id="anthropic-accounts" class="account-grid"></div>
+      </div>
+    </section>
+
+    <section id="panel-env" class="panel hidden">
+      <p class="muted">Скопируй в shell или в настройки клиента (Cursor, Claude Code, BB judge).</p>
+      <div id="env-block" class="env-block"></div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/app.js" type="module"></script>
+</body>
+</html>

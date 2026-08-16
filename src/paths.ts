@@ -34,3 +34,9 @@ export function logDir(): string {
 
 export const DEFAULT_OPENAI_GID =
   'cfe83f1b603c9dfef46e8ea3eca0eac2bfb59411a7687a405a05eb4c483f3949';
+
+export const DEFAULT_UI_PORT = 8790;
+
+export function uiDir(): string {
+  return path.join(repoRoot, 'ui');
+}
