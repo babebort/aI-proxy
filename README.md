@@ -28,8 +28,21 @@
 |-----|--------|
 | **Node.js** | 22+ |
 | **Go** | 1.22+ (сборка vendored codexer) |
-| **macOS** | OAuth «+ Добавить» / ↺ Reauth открывают **Terminal** |
-| **Браузер** | Chrome / Safari / Edge — для PWA |
+| **macOS** | Claude OAuth пока через **Terminal** (`tcr login`); ChatGPT — в UI |
+| **Браузер** | Chrome / Safari / Edge — панель на `:8790` |
+
+---
+
+## Обновление (после `git pull`)
+
+```bash
+cd aI-proxy
+git pull
+npm run build
+npm run stop && npm start
+```
+
+В UI нажми **↻** на карточке или **Обновить лимиты** — подтянет quota заново.
 
 ---
 
@@ -57,6 +70,12 @@ npm start
 
 Откроется браузер на `http://127.0.0.1:8790`. Прокси `:8787` поднимется автоматически.
 
+**Нативная обёртка (Dock, не PWA):**
+
+```bash
+npm run install-app   # → ~/Applications/AI Proxy.app
+```
+
 ---
 
 ## Ежедневный workflow
@@ -64,32 +83,27 @@ npm start
 ```bash
 cd ~/Documents/PycharmProjects/aI-proxy   # или свой путь
 
-npm start          # UI в фоне + откроет Terminal с tail ui.log
-npm start -- --open-browser   # браузер вместо Terminal
+npm start          # UI в фоне + браузер на :8790
 npm run start:fg   # UI в этом терминале (Ctrl+C закрывает панель)
 
 npm run open       # браузер на :8790 (UI уже запущен)
 npm run stop       # убить UI (:8790)
 npm run stop -- --all   # UI + proxy (:8787) + codexer (:9090)
+npm run install-app     # macOS .app в ~/Applications
 ```
 
 Логи фонового UI: `~/.config/ai-proxy/logs/ui.log`
 
-### Web App (PWA) — иконка в Dock
+### Окно в Dock
 
-`npm start` поднимает сервер в фоне и по умолчанию открывает **Terminal** с live-логом. PWA — удобное окно в Dock (через `npm run open`).
+Предпочтительно **`npm run install-app`** — отдельное приложение, Chrome app-mode на localhost.
 
-1. `npm start`
-2. Открой `http://127.0.0.1:8790`
-3. Установи как приложение:
+PWA (Chrome «Установить сайт») тоже работает, но это запасной вариант:
 
-| Браузер | Действие |
-|---------|----------|
-| **Chrome** | ⋮ → «Установить AI Proxy» (или кнопка **Установить** вверху) |
-| **Safari** | Поделиться → «На Dock» |
-| **Edge** | ⋮ → Apps → Install this site as an app |
+1. `npm start` → `http://127.0.0.1:8790`
+2. Chrome ⋮ → «Установить AI Proxy» или Safari → Поделиться → «На Dock»
 
-Дальше можно открывать из Dock; `npm start` нужен, пока работаешь.
+`npm start` должен быть запущен, пока работаешь.
 
 ---
 
@@ -105,15 +119,16 @@ npm run stop -- --all   # UI + proxy (:8787) + codexer (:9090)
 
 | Элемент | Действие |
 |---------|----------|
-| **+ Добавить аккаунт** | OAuth в Terminal (`codexer auth` / `tcr login`) |
+| **+ Добавить аккаунт** (ChatGPT) | OAuth **в UI** — модалка, браузер auth.openai.com |
+| **+ Добавить аккаунт** (Claude) | Terminal: `tcr login` |
 | **↻** на карточке | Обновить лимиты **этого** аккаунта |
-| **↺** на карточке | **Reauth** — удалить битую запись + OAuth заново (тот же alias) |
+| **↺** на карточке | **Reauth** — ChatGPT в UI; Claude в Terminal |
 | **Обновить лимиты** | Probe всех аккаунтов сразу |
 
 **Лимиты ChatGPT:** `GET /backend-api/wham/usage` (неделя / окно, % used)  
-**Лимиты Claude:** probe + headers `anthropic-ratelimit-*`
+**Лимиты Claude:** `count_tokens` + headers `anthropic-ratelimit-unified-*` (5h / 7d)
 
-После OAuth в Terminal нажми **↻** на карточке.
+После добавления ChatGPT лимиты подтягиваются сами. Claude — **↻** после `tcr login`.
 
 ### Клиенты
 
@@ -146,8 +161,7 @@ Gateway для codexer напрямую (если нужен только OpenAI
 |---------|------------|
 | `npm run setup` | Первичная установка (см. выше) |
 | `npm run build` | Только compile (`tsc`) |
-| `npm start` | UI в фоне + **Terminal** с `tail -f ui.log` |
-| `npm start -- --open-browser` | UI в фоне + браузер вместо Terminal |
+| `npm start` | UI в фоне + браузер `:8790` |
 | `npm run start:fg` | UI в текущем терминале (Ctrl+C) |
 | `npm run open` | Браузер на `:8790` (UI уже должен работать) |
 | `npm run stop` | Остановить UI |
@@ -155,7 +169,7 @@ Gateway для codexer напрямую (если нужен только OpenAI
 | `npm run install-binaries` | Пересобрать codexer / скачать tcr |
 | `npm run link-bin` | `npx ai-proxy` → `dist/bootstrap.js` |
 | `npm test` | Тесты |
-| `npm run install-app` | *(legacy)* macOS `.app` в `~/Applications` |
+| `npm run install-app` | macOS **AI Proxy.app** → `~/Applications` |
 
 ---
 
@@ -192,8 +206,10 @@ aI-proxy/
 | UI не открылся | `open http://127.0.0.1:8790` или `npm run open` |
 | **Ctrl+C не гасит** / завис терминал | `npm run stop` или `npm run stop -- --all` (не нужен Ctrl+C — `npm start` уже в фоне) |
 | Жёстко убить порты | `lsof -ti tcp:8790,8787,9090 \| xargs kill -9` |
-| **`missing chatgpt account id`** | **↺ Reauth** на карточке → OAuth в Terminal → тот же alias → **↻** |
+| **`missing chatgpt account id`** | **↺ Reauth** на карточке → OAuth в UI → тот же alias |
 | `err` / `no token` на карточке | **↺ Reauth** или «+ Добавить аккаунт» |
+| Claude **404 model: claude-sonnet-4-…** | `git pull && npm run build && npm run stop && npm start` — старый probe; потом **↻** |
+| Claude лимиты пустые | **↻** на карточке; аккаунт должен быть залогинен через `tcr login` |
 | 401 OpenAI в клиенте | Reauth ChatGPT; проверь `OPENAI_API_KEY` = `group.api` |
 | 429 OpenAI | Добавь аккаунты / ротация в codexer |
 | Нет Claude | «+ Добавить» (Anthropic) → `tcr login` |
