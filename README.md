@@ -26,21 +26,21 @@
 
 ### 1. Установка
 
+Требуется **Node 22+** и **Go 1.22+** (для сборки встроенного codexer).
+
 ```bash
 git clone git@github.com:babebort/aI-proxy.git
 cd aI-proxy
 
-npm install
-npm run build
-npm run install-binaries   # копирует codexer в resources/bin/
+npm run setup    # install + build TS + go build codexer
 ```
 
-Если `codexer` ещё нет:
+Или по шагам:
 
 ```bash
-git clone https://github.com/vladvlsu/codexer ~/codexer
-cd ~/codexer && go build -o codexer .
-cd ~/aI-proxy && npm run install-binaries
+npm install
+npm run build
+npm run install-binaries   # go build codexer/ → resources/bin/codexer
 ```
 
 ### 2. OpenAI — добавить ChatGPT-аккаунты
@@ -130,10 +130,12 @@ ai-proxy anthropic login | accounts
 ## Файлы
 
 ```
-~/.config/ai-proxy/config.yml      # порты, пути к конфигам
-~/.config/ai-proxy/run/            # pid-файлы
-~/.config/codexer/config.yml        # OpenAI аккаунты
-~/.config/teamclaude.json          # Anthropic аккаунты
+aI-proxy/
+├── codexer/                 # vendored OpenAI proxy (Go)
+├── src/                     # unified Node server
+├── resources/bin/codexer    # built binary (gitignored)
+~/.config/codexer/config.yml # OpenAI аккаунты
+~/.config/teamclaude.json    # Anthropic аккаунты
 ```
 
 ---
@@ -142,7 +144,7 @@ ai-proxy anthropic login | accounts
 
 | Проблема | Решение |
 |----------|---------|
-| `codexer not found` | `npm run install-binaries` или `go build` в `~/codexer` |
+| `codexer not found` | `npm run install-binaries` (нужен Go) |
 | `tcr not found` | установи teamclaude-rs, нужен только для `anthropic login` |
 | 401 на OpenAI | `npx ai-proxy openai login` |
 | 429 при одном аккаунте | добавь второй: `openai login` / `anthropic login` |

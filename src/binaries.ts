@@ -52,10 +52,7 @@ async function assertExecutable(file: string, label: string): Promise<void> {
 }
 
 export async function resolveCodexer(): Promise<string> {
-  return resolveBinary('codexer', 'AI_PROXY_CODEXER', [
-    '~/codexer/codexer',
-    '/Users/bortnik/codexer/codexer',
-  ]);
+  return resolveBinary('codexer', 'AI_PROXY_CODEXER', []);
 }
 
 export async function resolveTeamclaude(): Promise<string> {

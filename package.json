@@ -8,10 +8,12 @@
   },
   "scripts": {
     "build": "tsc",
+    "build:codexer": "go build -C codexer -o resources/bin/codexer .",
     "start": "node dist/cli.js start --foreground",
     "dev": "node --experimental-transform-types src/cli.ts",
     "test": "npm run build && node --test dist/**/*.test.js",
     "install-binaries": "bash scripts/install-binaries.sh",
+    "setup": "npm install && npm run build && npm run install-binaries",
     "prepack": "npm run build"
   },
   "engines": {
