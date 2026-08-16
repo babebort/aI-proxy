@@ -64,10 +64,11 @@ npm start
 ```bash
 cd ~/Documents/PycharmProjects/aI-proxy   # или свой путь
 
-npm start          # UI + proxy в фоне — терминал сразу свободен
+npm start          # UI в фоне + откроет Terminal с tail ui.log
+npm start -- --open-browser   # браузер вместо Terminal
 npm run start:fg   # UI в этом терминале (Ctrl+C закрывает панель)
 
-npm run open       # открыть панель, если UI уже запущен
+npm run open       # браузер на :8790 (UI уже запущен)
 npm run stop       # убить UI (:8790)
 npm run stop -- --all   # UI + proxy (:8787) + codexer (:9090)
 ```
@@ -76,7 +77,7 @@ npm run stop -- --all   # UI + proxy (:8787) + codexer (:9090)
 
 ### Web App (PWA) — иконка в Dock
 
-`npm start` поднимает сервер в фоне — терминал не нужен держать открытым. PWA — удобное окно в Dock.
+`npm start` поднимает сервер в фоне и по умолчанию открывает **Terminal** с live-логом. PWA — удобное окно в Dock (через `npm run open`).
 
 1. `npm start`
 2. Открой `http://127.0.0.1:8790`
@@ -145,9 +146,10 @@ Gateway для codexer напрямую (если нужен только OpenAI
 |---------|------------|
 | `npm run setup` | Первичная установка (см. выше) |
 | `npm run build` | Только compile (`tsc`) |
-| `npm start` | UI `:8790` + proxy в **фоне** (терминал свободен) |
+| `npm start` | UI в фоне + **Terminal** с `tail -f ui.log` |
+| `npm start -- --open-browser` | UI в фоне + браузер вместо Terminal |
 | `npm run start:fg` | UI в текущем терминале (Ctrl+C) |
-| `npm run open` | Открыть браузер, UI уже должен работать |
+| `npm run open` | Браузер на `:8790` (UI уже должен работать) |
 | `npm run stop` | Остановить UI |
 | `npm run stop -- --all` | UI + proxy + codexer |
 | `npm run install-binaries` | Пересобрать codexer / скачать tcr |

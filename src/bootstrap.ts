@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_UI_PORT, logDir } from './paths.js';
 import { writePidFile } from './process.js';
+import { openControlPanelTerminal, openUiWindow } from './ui/open-window.js';
 
 const distDir = path.dirname(fileURLToPath(import.meta.url));
 const mainJs = path.join(distDir, 'main.js');
@@ -36,11 +37,19 @@ async function main(): Promise<void> {
   const port = portFromArgs();
   const url = `http://127.0.0.1:${port}`;
   const noOpen = process.argv.includes('--no-open');
+  const openBrowser =
+    process.argv.includes('--open-browser') ||
+    process.env.AI_PROXY_OPEN === 'browser';
 
   if (await uiIsUp(port)) {
     console.log(`AI-proxy already running  ${url}`);
     if (!noOpen) {
-      spawn('open', [url], { stdio: 'ignore', detached: true }).unref();
+      if (openBrowser) {
+        openUiWindow(url, false);
+      } else {
+        const logFile = path.join(logDir(), 'ui.log');
+        openControlPanelTerminal(url, logFile);
+      }
     }
     return;
   }
@@ -49,8 +58,7 @@ async function main(): Promise<void> {
   const logFile = path.join(logDir(), 'ui.log');
   const logFd = openSync(logFile, 'a');
 
-  const childArgs = [`--port=${port}`, '--background-child'];
-  if (noOpen) childArgs.push('--no-open');
+  const childArgs = [`--port=${port}`, '--background-child', '--no-open'];
 
   const child = spawn(process.execPath, [mainJs, ...childArgs], {
     detached: true,
@@ -71,7 +79,11 @@ async function main(): Promise<void> {
       console.log(`logs: ${logFile}`);
       console.log('npm run stop — закрыть UI · npm run stop -- --all — UI + proxy');
       if (!noOpen) {
-        spawn('open', [url], { stdio: 'ignore', detached: true }).unref();
+        if (openBrowser) {
+          openUiWindow(url, false);
+        } else {
+          openControlPanelTerminal(url, logFile);
+        }
       }
       return;
     }
