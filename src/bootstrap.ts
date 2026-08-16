@@ -37,11 +37,16 @@ async function main(): Promise<void> {
   const port = portFromArgs();
   const url = `http://127.0.0.1:${port}`;
   const noOpen = process.argv.includes('--no-open');
+  const openExplicit =
+    process.argv.includes('--open') ||
+    process.env.AI_PROXY_OPEN === 'browser' ||
+    process.env.AI_PROXY_OPEN === 'app';
+  const appMode = process.env.AI_PROXY_OPEN === 'app' || process.argv.includes('--app');
 
   if (await uiIsUp(port)) {
     console.log(`AI-proxy already running  ${url}`);
-    if (!noOpen) {
-      openUiWindow(url, false);
+    if (openExplicit && !noOpen) {
+      openUiWindow(url, appMode);
     }
     return;
   }
@@ -69,9 +74,11 @@ async function main(): Promise<void> {
       await writePidFile('ui', child.pid, port);
       console.log(`AI-proxy  ${url}  (background pid ${child.pid})`);
       console.log(`logs: ${logFile}`);
-      console.log('npm run stop — закрыть UI · npm run install-app — .app в Applications');
-      if (!noOpen) {
-        openUiWindow(url, false);
+      console.log('Добавить аккаунт:  npm run auth:openai  |  npm run auth:anthropic');
+      console.log('Открыть панель:    npm run open  |  npm run install-app');
+      console.log('Остановить:        npm run stop');
+      if (openExplicit && !noOpen) {
+        openUiWindow(url, appMode);
       }
       return;
     }

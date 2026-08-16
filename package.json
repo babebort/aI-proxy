@@ -7,12 +7,14 @@
     "ai-proxy": "./dist/bootstrap.js"
   },
   "scripts": {
-    "compile": "tsc && chmod +x dist/main.js dist/bootstrap.js dist/stop.js",
+    "compile": "tsc && chmod +x dist/main.js dist/bootstrap.js dist/stop.js dist/cli/auth-openai.js dist/cli/auth-anthropic.js",
     "build": "npm run compile",
     "start": "node dist/bootstrap.js",
     "start:fg": "node dist/main.js --foreground",
-    "stop": "node dist/stop.js",
     "open": "node dist/main.js --open-only",
+    "auth:openai": "node dist/cli/auth-openai.js",
+    "auth:anthropic": "node dist/cli/auth-anthropic.js",
+    "stop": "node dist/stop.js",
     "dev": "node --experimental-transform-types src/main.ts",
     "test": "npm run compile && node --test dist/**/*.test.js",
     "install-binaries": "bash scripts/install-binaries.sh",

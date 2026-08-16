@@ -68,12 +68,23 @@ npm run setup
 npm start
 ```
 
-Откроется браузер на `http://127.0.0.1:8790`. Прокси `:8787` поднимется автоматически.
+UI поднимается в фоне на `:8790`, **браузер не открывается**. Proxy `:8787` стартует сам.
 
-**Нативная обёртка (Dock, не PWA):**
+**Добавить аккаунт (без web-панели):**
 
 ```bash
-npm run install-app   # → ~/Applications/AI Proxy.app
+npm run auth:openai      # ChatGPT — OAuth в терминале + браузер
+npm run auth:anthropic   # Claude — tcr login
+```
+
+Опции ChatGPT: `--alias=voip --new-group=main` или `--gid=<gid>` · `--no-browser` — только ссылка.
+
+**Открыть панель** (лимиты, env, обзор):
+
+```bash
+npm run open             # браузер
+npm run install-app      # AI Proxy.app в Dock
+AI_PROXY_OPEN=app npm start -- --open   # chromeless окно
 ```
 
 ---
@@ -83,10 +94,11 @@ npm run install-app   # → ~/Applications/AI Proxy.app
 ```bash
 cd ~/Documents/PycharmProjects/aI-proxy   # или свой путь
 
-npm start          # UI в фоне + браузер на :8790
+npm start          # UI + proxy в фоне, без браузера
+npm run auth:openai    # + ChatGPT аккаунт (terminal)
+npm run auth:anthropic # + Claude аккаунт (tcr)
+npm run open       # открыть панель :8790
 npm run start:fg   # UI в этом терминале (Ctrl+C закрывает панель)
-
-npm run open       # браузер на :8790 (UI уже запущен)
 npm run stop       # убить UI (:8790)
 npm run stop -- --all   # UI + proxy (:8787) + codexer (:9090)
 npm run install-app     # macOS .app в ~/Applications
@@ -119,8 +131,8 @@ PWA (Chrome «Установить сайт») тоже работает, но �
 
 | Элемент | Действие |
 |---------|----------|
-| **+ Добавить аккаунт** (ChatGPT) | OAuth **в UI** — модалка, браузер auth.openai.com |
-| **+ Добавить аккаунт** (Claude) | Terminal: `tcr login` |
+| **+ Добавить аккаунт** (ChatGPT) | UI-модалка **или** `npm run auth:openai` |
+| **+ Добавить аккаунт** (Claude) | `npm run auth:anthropic` (tcr login) |
 | **↻** на карточке | Обновить лимиты **этого** аккаунта |
 | **↺** на карточке | **Reauth** — ChatGPT в UI; Claude в Terminal |
 | **Обновить лимиты** | Probe всех аккаунтов сразу |
@@ -161,9 +173,11 @@ Gateway для codexer напрямую (если нужен только OpenAI
 |---------|------------|
 | `npm run setup` | Первичная установка (см. выше) |
 | `npm run build` | Только compile (`tsc`) |
-| `npm start` | UI в фоне + браузер `:8790` |
+| `npm start` | UI + proxy в фоне (**без** браузера) |
+| `npm run auth:openai` | Добавить ChatGPT (terminal OAuth) |
+| `npm run auth:anthropic` | Добавить Claude (`tcr login`) |
 | `npm run start:fg` | UI в текущем терминале (Ctrl+C) |
-| `npm run open` | Браузер на `:8790` (UI уже должен работать) |
+| `npm run open` | Браузер на `:8790` |
 | `npm run stop` | Остановить UI |
 | `npm run stop -- --all` | UI + proxy + codexer |
 | `npm run install-binaries` | Пересобрать codexer / скачать tcr |
