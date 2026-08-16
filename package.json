@@ -20,13 +20,13 @@
   "license": "MIT",
   "private": true,
   "dependencies": {
-    "commander": "^14.0.0",
+    "commander": "^15.0.0",
     "yaml": "^2.9.0"
   },
   "devDependencies": {
-    "@types/node": "^24.3.0",
-    "tsx": "^4.20.5",
-    "typescript": "^6.0.0",
-    "vitest": "^3.2.4"
+    "@types/node": "^26.2.0",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
   }
 }
