@@ -1,24 +1,25 @@
-import { describe, expect, it } from 'vitest';
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
 import { AccountManager } from './account-manager.js';
 import { extractSessionKey, SessionAffinity } from './session.js';
 
 describe('session affinity', () => {
   it('extracts metadata.user_id as session key', () => {
     const body = Buffer.from(JSON.stringify({ metadata: { user_id: 'conv-abc' }, messages: [] }));
-    expect(extractSessionKey(body)).toBe('conv-abc');
+    assert.equal(extractSessionKey(body), 'conv-abc');
   });
 
   it('pins and expires sessions', () => {
     const affinity = new SessionAffinity();
     const now = 1_000_000;
     affinity.pin('conv-1', 'acc-a', now);
-    expect(affinity.lookup('conv-1', now + 1000)).toBe('acc-a');
-    expect(affinity.lookup('conv-1', now + 16 * 60 * 1000)).toBeUndefined();
+    assert.equal(affinity.lookup('conv-1', now + 1000), 'acc-a');
+    assert.equal(affinity.lookup('conv-1', now + 16 * 60 * 1000), undefined);
   });
 });
 
 describe('AccountManager selection', () => {
-  it('skips accounts over switch threshold', async () => {
+  it('skips accounts over switch threshold', () => {
     const manager = new AccountManager('/dev/null');
     manager['poolConfig'] = {
       upstream: 'https://api.anthropic.com',
@@ -37,10 +38,10 @@ describe('AccountManager selection', () => {
       quota: { fiveHour: { utilization: 0.1, resetMs: Date.now() + 60_000 } },
     });
 
-    expect(manager.select()?.name).toBe('cool');
+    assert.equal(manager.select()?.name, 'cool');
   });
 
-  it('honours affinity pin when account is eligible', async () => {
+  it('honours affinity pin when account is eligible', () => {
     const manager = new AccountManager('/dev/null');
     manager['poolConfig'] = {
       upstream: 'https://api.anthropic.com',
@@ -56,6 +57,6 @@ describe('AccountManager selection', () => {
       });
     }
     manager.pinSession('conv-x', 'b');
-    expect(manager.select('conv-x')?.name).toBe('b');
+    assert.equal(manager.select('conv-x')?.name, 'b');
   });
 });

@@ -9,8 +9,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/cli.js start --foreground",
-    "dev": "tsx src/cli.ts",
-    "test": "vitest run",
+    "dev": "node --experimental-transform-types src/cli.ts",
+    "test": "npm run build && node --test dist/**/*.test.js",
     "install-binaries": "bash scripts/install-binaries.sh",
     "prepack": "npm run build"
   },
@@ -25,12 +25,6 @@
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
-    "tsx": "^4.23.12",
-    "typescript": "^7.0.2",
-    "vitest": "^4.1.10"
-  },
-  "allowScripts": {
-    "esbuild@0.28.2": true,
-    "fsevents@2.3.3": true
+    "typescript": "^7.0.2"
   }
 }

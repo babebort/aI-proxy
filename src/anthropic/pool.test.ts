@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
 import { AccountPool } from './pool.js';
 
 describe('AccountPool', () => {
@@ -7,9 +8,9 @@ describe('AccountPool', () => {
       { name: 'a', accessToken: 't1' },
       { name: 'b', accessToken: 't2' },
     ]);
-    expect(pool.next()?.name).toBe('a');
-    expect(pool.next()?.name).toBe('b');
-    expect(pool.next()?.name).toBe('a');
+    assert.equal(pool.next()?.name, 'a');
+    assert.equal(pool.next()?.name, 'b');
+    assert.equal(pool.next()?.name, 'a');
   });
 
   it('skips disabled accounts', () => {
@@ -17,8 +18,8 @@ describe('AccountPool', () => {
       { name: 'a', accessToken: 't1', disabled: true },
       { name: 'b', accessToken: 't2' },
     ]);
-    expect(pool.size()).toBe(1);
-    expect(pool.next()?.name).toBe('b');
+    assert.equal(pool.size(), 1);
+    assert.equal(pool.next()?.name, 'b');
   });
 
   it('skips named account on retry when alternatives exist', () => {
@@ -26,6 +27,6 @@ describe('AccountPool', () => {
       { name: 'a', accessToken: 't1' },
       { name: 'b', accessToken: 't2' },
     ]);
-    expect(pool.next('a')?.name).toBe('b');
+    assert.equal(pool.next('a')?.name, 'b');
   });
 });
