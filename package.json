@@ -1,69 +1,32 @@
 {
-  "name": "codexer",
-  "version": "1.0.0",
-  "description": "A polished local Electron desktop client for the Codexarion OpenAI-compatible gateway.",
-  "main": "src/main.js",
-  "author": "Codexarion",
+  "name": "ai-proxy",
+  "version": "0.1.0",
+  "description": "Local dual-provider proxy: OpenAI (codexer) + Anthropic (teamclaude-rs) with multi-account autobalance.",
+  "type": "module",
+  "bin": {
+    "ai-proxy": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/cli.js start --foreground",
+    "dev": "tsx src/cli.ts",
+    "test": "vitest run",
+    "install-binaries": "bash scripts/install-binaries.sh",
+    "prepack": "npm run build"
+  },
+  "engines": {
+    "node": ">=22"
+  },
   "license": "MIT",
   "private": true,
-  "type": "commonjs",
-  "scripts": {
-    "start": "electron .",
-    "dev": "electron .",
-    "make-icon": "bash scripts/make-icon.sh",
-    "prepack": "npm run make-icon",
-    "dist": "electron-builder --mac dmg zip",
-    "dist:dir": "electron-builder --mac dir"
+  "dependencies": {
+    "commander": "^14.0.0",
+    "yaml": "^2.8.1"
   },
   "devDependencies": {
-    "electron": "39.0.0",
-    "electron-builder": "26.0.12"
-  },
-  "dependencies": {
-    "yaml": "2.8.1"
-  },
-  "build": {
-    "appId": "com.codexer.desktop",
-    "productName": "Codexarion",
-    "asar": true,
-    "files": [
-      "src/**/*",
-      "assets/**/*",
-      "package.json"
-    ],
-    "directories": {
-      "buildResources": "build",
-      "output": "release"
-    },
-    "mac": {
-      "category": "public.app-category.productivity",
-      "target": [
-        {
-          "target": "dmg",
-          "arch": [
-            "arm64"
-          ]
-        },
-        {
-          "target": "zip",
-          "arch": [
-            "arm64"
-          ]
-        }
-      ],
-      "icon": "build/icon.icns",
-      "hardenedRuntime": true,
-      "gatekeeperAssess": false,
-      "artifactName": "${productName}-${version}-${arch}.${ext}"
-    },
-    "dmg": {
-      "title": "Codexarion",
-      "backgroundColor": "#f6f5ff",
-      "iconSize": 128,
-      "window": {
-        "width": 680,
-        "height": 440
-      }
-    }
+    "@types/node": "^24.3.0",
+    "tsx": "^4.20.5",
+    "typescript": "^6.0.0",
+    "vitest": "^3.2.4"
   }
 }

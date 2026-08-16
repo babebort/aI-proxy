@@ -1,6 +1,20 @@
+# Dependencies
 node_modules/
+dist/
 release/
-build/icon.icns
-build/*.iconset
+out/
+*.tsbuildinfo
+
+# Bundled backends (populated by scripts/install-binaries.sh)
+resources/bin/codexer
+resources/bin/tcr
+
+# OS
 .DS_Store
-npm-debug.log*
+
+# Logs / runtime
+*.log
+
+# Secrets — never commit
+.env
+*.pem
