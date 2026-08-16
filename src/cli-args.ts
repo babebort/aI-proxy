@@ -1,6 +1,8 @@
 export interface CliArgs {
   detach: boolean;
   openOnly: boolean;
+  foreground: boolean;
+  backgroundChild: boolean;
   port?: number;
   noOpen: boolean;
 }
@@ -16,6 +18,8 @@ export function parseCliArgs(argv: string[] = process.argv.slice(2)): CliArgs {
   return {
     detach: argv.includes('--detach'),
     openOnly: argv.includes('--open-only'),
+    foreground: argv.includes('--foreground'),
+    backgroundChild: argv.includes('--background-child'),
     port,
     noOpen: argv.includes('--no-open'),
   };

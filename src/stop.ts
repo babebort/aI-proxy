@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** Stop AI-proxy UI (:8790) and optional proxy (:8787). */
 import { DEFAULT_UI_PORT } from './paths.js';
-import { readManaged, stopManaged } from './process.js';
+import { stopManaged } from './process.js';
 
 async function killPort(port: number): Promise<boolean> {
   try {
@@ -25,6 +25,8 @@ async function main(): Promise<void> {
     stopped = (await stopManaged('unified')) || (await stopManaged('openai')) || stopped;
     await killPort(DEFAULT_UI_PORT);
   }
+
+  stopped = (await stopManaged('ui')) || stopped;
 
   const { execSync } = await import('node:child_process');
   for (const port of stopProxy ? [DEFAULT_UI_PORT, 8787, 9090] : [DEFAULT_UI_PORT]) {

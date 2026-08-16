@@ -1,5 +1,6 @@
 import { DEFAULT_UI_PORT } from '../paths.js';
 import { ensureProxyRunning } from '../proxy-lifecycle.js';
+import { writePidFile } from '../process.js';
 import { openUiWindow } from './open-window.js';
 import { startUiServer } from './server.js';
 
@@ -8,8 +9,12 @@ export interface LaunchUiOptions {
   open?: boolean;
   app?: boolean;
   autoProxy?: boolean;
-  /** Start servers and exit (used by the macOS .app launcher via nohup). */
+  /** Legacy: exit without waiting (server dies unless spawned detached). */
   detach?: boolean;
+  /** Spawned by bootstrap.ts — keep running, no Ctrl+C wait. */
+  backgroundChild?: boolean;
+  /** Block terminal until Ctrl+C (npm run start:fg). */
+  foreground?: boolean;
   /** Only open the panel if the UI server is already up. */
   openOnly?: boolean;
 }
@@ -53,16 +58,17 @@ export async function launchUi(options: LaunchUiOptions = {}): Promise<void> {
 
   const server = startUiServer(port);
   if (open) {
-    // PWA in browser — user installs from Chrome/Safari; no forced chromeless window.
     openUiWindow(url, false);
   }
 
-  if (options.detach) {
+  await writePidFile('ui', process.pid, port).catch(() => undefined);
+
+  if (options.backgroundChild || options.detach) {
     return;
   }
 
   console.log(`AI-proxy  ${url}`);
-  console.log('Ctrl+C closes the panel. Proxy :8787 keeps running in background.');
+  console.log('Ctrl+C closes the panel. npm run stop — закрыть UI.');
 
   await new Promise<void>((resolve) => {
     const shutdown = () => {

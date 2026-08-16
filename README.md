@@ -64,17 +64,19 @@ npm start
 ```bash
 cd ~/Documents/PycharmProjects/aI-proxy   # или свой путь
 
-npm start          # UI + proxy (терминал занят — это норма)
-# Ctrl+C           # закрыть только UI; proxy :8787 остаётся
+npm start          # UI + proxy в фоне — терминал сразу свободен
+npm run start:fg   # UI в этом терминале (Ctrl+C закрывает панель)
 
 npm run open       # открыть панель, если UI уже запущен
 npm run stop       # убить UI (:8790)
 npm run stop -- --all   # UI + proxy (:8787) + codexer (:9090)
 ```
 
+Логи фонового UI: `~/.config/ai-proxy/logs/ui.log`
+
 ### Web App (PWA) — иконка в Dock
 
-Сервер всё равно крутится в терминале (или через `nohup`). PWA — только удобное окно.
+`npm start` поднимает сервер в фоне — терминал не нужен держать открытым. PWA — удобное окно в Dock.
 
 1. `npm start`
 2. Открой `http://127.0.0.1:8790`
@@ -143,12 +145,13 @@ Gateway для codexer напрямую (если нужен только OpenAI
 |---------|------------|
 | `npm run setup` | Первичная установка (см. выше) |
 | `npm run build` | Только compile (`tsc`) |
-| `npm start` | UI `:8790` + auto-start proxy `:8787` |
+| `npm start` | UI `:8790` + proxy в **фоне** (терминал свободен) |
+| `npm run start:fg` | UI в текущем терминале (Ctrl+C) |
 | `npm run open` | Открыть браузер, UI уже должен работать |
 | `npm run stop` | Остановить UI |
 | `npm run stop -- --all` | UI + proxy + codexer |
 | `npm run install-binaries` | Пересобрать codexer / скачать tcr |
-| `npm run link-bin` | `npx ai-proxy` → `dist/main.js` |
+| `npm run link-bin` | `npx ai-proxy` → `dist/bootstrap.js` |
 | `npm test` | Тесты |
 | `npm run install-app` | *(legacy)* macOS `.app` в `~/Applications` |
 
@@ -185,7 +188,7 @@ aI-proxy/
 |----------|---------|
 | `codexer not found` | `npm run install-binaries` |
 | UI не открылся | `open http://127.0.0.1:8790` или `npm run open` |
-| **Ctrl+C не гасит** / завис терминал | `npm run stop` или `npm run stop -- --all` |
+| **Ctrl+C не гасит** / завис терминал | `npm run stop` или `npm run stop -- --all` (не нужен Ctrl+C — `npm start` уже в фоне) |
 | Жёстко убить порты | `lsof -ti tcp:8790,8787,9090 \| xargs kill -9` |
 | **`missing chatgpt account id`** | **↺ Reauth** на карточке → OAuth в Terminal → тот же alias → **↻** |
 | `err` / `no token` на карточке | **↺ Reauth** или «+ Добавить аккаунт» |

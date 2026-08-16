@@ -10,6 +10,8 @@ await launchUi({
   open: !args.noOpen,
   detach: args.detach,
   openOnly: args.openOnly,
+  backgroundChild: args.backgroundChild,
+  foreground: args.foreground,
 }).catch((error: unknown) => {
   console.error(error instanceof Error ? error.message : error);
   process.exit(1);

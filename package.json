@@ -4,12 +4,13 @@
   "description": "Unified local proxy with browser control panel (OpenAI codexer + Anthropic pool).",
   "type": "module",
   "bin": {
-    "ai-proxy": "./dist/main.js"
+    "ai-proxy": "./dist/bootstrap.js"
   },
   "scripts": {
-    "compile": "tsc && chmod +x dist/main.js dist/stop.js",
+    "compile": "tsc && chmod +x dist/main.js dist/bootstrap.js dist/stop.js",
     "build": "npm run compile",
-    "start": "node dist/main.js",
+    "start": "node dist/bootstrap.js",
+    "start:fg": "node dist/main.js --foreground",
     "stop": "node dist/stop.js",
     "open": "node dist/main.js --open-only",
     "dev": "node --experimental-transform-types src/main.ts",
