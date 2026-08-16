@@ -13,7 +13,8 @@
     "dev": "node --experimental-transform-types src/cli.ts",
     "test": "npm run build && node --test dist/**/*.test.js",
     "install-binaries": "bash scripts/install-binaries.sh",
-    "setup": "npm install && npm run build && npm run install-binaries",
+    "link-bin": "bash scripts/link-local-bin.sh",
+    "setup": "npm install && npm run build && npm run install-binaries && npm run link-bin",
     "openai:login": "node dist/cli.js openai login",
     "anthropic:login": "node dist/cli.js anthropic login",
     "prepack": "npm run build"
