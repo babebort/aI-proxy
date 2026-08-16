@@ -4,7 +4,10 @@ const panels = {
   overview: { el: '#panel-overview', title: 'Обзор' },
   accounts: { el: '#panel-accounts', title: 'Аккаунты' },
   env: { el: '#panel-env', title: 'Клиенты' },
+  settings: { el: '#panel-settings', title: 'Настройки' },
 };
+
+let lastSettings = null;
 
 let pollTimer = null;
 let lastStatus = null;
@@ -46,6 +49,67 @@ function showPanel(name) {
     btn.classList.toggle('active', btn.dataset.panel === name);
   }
   $('#panel-title').textContent = panels[name].title;
+  if (name === 'settings') {
+    void loadSettings();
+  }
+}
+
+function renderSettingsView(data) {
+  lastSettings = data;
+  $('#settings-config-path').textContent = data.configPath;
+  const sourceEl = $('#smspool-source');
+  if (data.smspool.source === 'env') {
+    sourceEl.textContent = 'Ключ задан через env SMSPOOL_API_KEY — поле ниже пишет в config.yml';
+    sourceEl.classList.remove('hidden');
+  } else {
+    sourceEl.classList.add('hidden');
+  }
+  $('#smspool-masked').textContent = data.smspool.configured
+    ? `Сейчас: ${data.smspool.masked}`
+    : 'Ключ не задан';
+  $('#smspool-api-key').value = '';
+
+  const modelSelect = $('#anthropic-probe-model');
+  modelSelect.innerHTML = data.anthropicProbe.models
+    .map(
+      (model) =>
+        `<option value="${esc(model)}"${model === data.anthropicProbe.model ? ' selected' : ''}>${esc(model)}</option>`,
+    )
+    .join('');
+
+  const reasoningSelect = $('#anthropic-probe-reasoning');
+  reasoningSelect.innerHTML = data.anthropicProbe.reasoningOptions
+    .map(
+      (opt) =>
+        `<option value="${esc(opt.id)}"${opt.id === data.anthropicProbe.reasoning ? ' selected' : ''}>${esc(opt.label)}</option>`,
+    )
+    .join('');
+}
+
+async function loadSettings() {
+  try {
+    renderSettingsView(await api('/api/settings'));
+  } catch (err) {
+    toast(err.message ?? 'Не удалось загрузить настройки');
+  }
+}
+
+async function saveSettings() {
+  const smspoolRaw = $('#smspool-api-key').value.trim();
+  const body = {
+    anthropicProbeModel: $('#anthropic-probe-model').value,
+    anthropicProbeReasoning: $('#anthropic-probe-reasoning').value,
+  };
+  if (smspoolRaw) {
+    body.smspoolApiKey = smspoolRaw;
+  }
+  try {
+    const data = await api('/api/settings', { method: 'PATCH', body: JSON.stringify(body) });
+    renderSettingsView(data);
+    toast('Настройки сохранены');
+  } catch (err) {
+    toast(err.message ?? 'Не удалось сохранить');
+  }
 }
 
 function esc(s) {
@@ -772,6 +836,7 @@ function bind() {
   $('#btn-probe').addEventListener('click', () => void probeLimits());
   $('#btn-openai-login').addEventListener('click', () => void login('openai'));
   $('#btn-anthropic-login').addEventListener('click', () => void login('anthropic'));
+  $('#btn-save-settings').addEventListener('click', () => void saveSettings());
   $('#btn-install').addEventListener('click', () => void installPwa());
   $('#install-dismiss').addEventListener('click', () => {
     $('#install-banner').classList.add('hidden');

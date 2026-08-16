@@ -365,6 +365,10 @@ tr:last-child td { border-bottom: 0; }
 .env-row code { flex: 1; font-size: 12px; word-break: break-all; }
 .env-row button { padding: 4px 8px; font-size: 12px; }
 
+.settings-card { margin-bottom: 14px; }
+.settings-card h2 { margin: 0 0 8px; font-size: 16px; }
+.settings-actions { display: flex; justify-content: flex-end; margin-top: 8px; }
+
 .muted { color: var(--muted); font-size: 12px; }
 
 .toast {

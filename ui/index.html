@@ -10,7 +10,7 @@
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/icon.svg">
-  <link rel="stylesheet" href="/styles.css?v=3">
+  <link rel="stylesheet" href="/styles.css?v=4">
 </head>
 <body>
   <div id="install-banner" class="install-banner hidden">
@@ -30,6 +30,7 @@
       <button type="button" class="nav-item" data-panel="overview">Обзор</button>
       <button type="button" class="nav-item active" data-panel="accounts">Аккаунты</button>
       <button type="button" class="nav-item" data-panel="env">Клиенты</button>
+      <button type="button" class="nav-item" data-panel="settings">Настройки</button>
     </nav>
 
     <div class="sidebar-bottom">
@@ -99,6 +100,38 @@
       <p class="muted">Скопируй в shell или в настройки клиента (Cursor, Claude Code, BB judge).</p>
       <div id="env-block" class="env-block"></div>
     </section>
+
+    <section id="panel-settings" class="panel hidden">
+      <p class="muted">Сохраняется в <code id="settings-config-path">~/.config/ai-proxy/config.yml</code></p>
+
+      <article class="card settings-card">
+        <h2>SMSPool</h2>
+        <p class="muted small">API key из smspool.net → Settings (32 символа). Авто-SMS при регистрации — скоро; ключ уже сохраняется здесь.</p>
+        <p id="smspool-source" class="muted small hidden"></p>
+        <label class="field">
+          <span>API key</span>
+          <input id="smspool-api-key" type="password" autocomplete="off" placeholder="вставь ключ…">
+        </label>
+        <p id="smspool-masked" class="muted small"></p>
+      </article>
+
+      <article class="card settings-card">
+        <h2>Claude — probe лимитов</h2>
+        <p class="muted small">Какой model/reasoning использовать при «Обновить лимиты».</p>
+        <label class="field">
+          <span>Model</span>
+          <select id="anthropic-probe-model"></select>
+        </label>
+        <label class="field">
+          <span>Reasoning (thinking)</span>
+          <select id="anthropic-probe-reasoning"></select>
+        </label>
+      </article>
+
+      <div class="settings-actions">
+        <button type="button" id="btn-save-settings" class="primary">Сохранить</button>
+      </div>
+    </section>
   </main>
 
   <div id="toast" class="toast hidden"></div>
@@ -152,6 +185,6 @@
     </form>
   </dialog>
 
-  <script src="/app.js?v=3" type="module"></script>
+  <script src="/app.js?v=4" type="module"></script>
 </body>
 </html>

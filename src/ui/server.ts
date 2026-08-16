@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ensureConfig } from '../config.js';
+import { ensureConfig, loadConfig, saveConfig } from '../config.js';
 import { waitForUp } from '../health.js';
 import { readManaged, startUnifiedDaemon, stopManaged } from '../process.js';
 import { publicPort } from '../proxy-lifecycle.js';
@@ -18,6 +18,9 @@ import {
   listOpenAiLoginGroups,
   submitOpenAiLoginCode,
 } from './openai-login-flow.js';
+import { buildSettingsPayload } from './settings-api.js';
+import { supervisorConfigPath } from '../paths.js';
+import type { AnthropicProbeReasoning, SupervisorConfig } from '../config.js';
 
 const daemonScript = fileURLToPath(new URL('../server/daemon.js', import.meta.url));
 
@@ -120,6 +123,55 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): P
     const stoppedUnified = await stopManaged('unified');
     const stoppedOpenai = await stopManaged('openai');
     json(res, 200, { ok: true, stoppedUnified, stoppedOpenai });
+    return true;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/settings') {
+    const config = await ensureConfig();
+    json(res, 200, buildSettingsPayload(config, supervisorConfigPath()));
+    return true;
+  }
+
+  if (req.method === 'PATCH' && url.pathname === '/api/settings') {
+    try {
+      const raw = await readBody(req);
+      let body: {
+        smspoolApiKey?: string | null;
+        anthropicProbeModel?: string;
+        anthropicProbeReasoning?: AnthropicProbeReasoning;
+      } = {};
+      if (raw.trim()) {
+        body = JSON.parse(raw) as typeof body;
+      }
+      const config = await loadConfig();
+      const next: SupervisorConfig = {
+        ...config,
+        anthropic: { ...config.anthropic },
+        integrations: { ...config.integrations, smspool: { ...config.integrations?.smspool } },
+      };
+
+      if ('smspoolApiKey' in body) {
+        const key = typeof body.smspoolApiKey === 'string' ? body.smspoolApiKey.trim() : '';
+        next.integrations = {
+          ...next.integrations,
+          smspool: { apiKey: key || null },
+        };
+      }
+      if (typeof body.anthropicProbeModel === 'string' && body.anthropicProbeModel.trim()) {
+        next.anthropic.probeModel = body.anthropicProbeModel.trim();
+      }
+      if (body.anthropicProbeReasoning) {
+        const allowed: AnthropicProbeReasoning[] = ['off', 'low', 'medium', 'high'];
+        if (allowed.includes(body.anthropicProbeReasoning)) {
+          next.anthropic.probeReasoning = body.anthropicProbeReasoning;
+        }
+      }
+
+      await saveConfig(next);
+      json(res, 200, buildSettingsPayload(next, supervisorConfigPath()));
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) });
+    }
     return true;
   }
 

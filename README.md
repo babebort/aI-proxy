@@ -146,6 +146,21 @@ PWA (Chrome «Установить сайт») тоже работает, но �
 
 Готовые `export …` для Cursor, BB, Claude Code — копируй в shell или `.zshrc`.
 
+### Настройки
+
+Вкладка **Настройки** в панели (`npm run open`) или файл `~/.config/ai-proxy/config.yml`:
+
+```yaml
+integrations:
+  smspool:
+    apiKey: "твой_32_символьный_ключ"
+anthropic:
+  probeModel: claude-haiku-4-5
+  probeReasoning: off   # off | low | medium | high
+```
+
+Через env: `export SMSPOOL_API_KEY=…` (приоритетнее файла).
+
 ---
 
 ## Env для клиентов

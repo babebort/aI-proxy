@@ -22,12 +22,26 @@ export interface AnthropicConfig {
   configFile: string;
   /** Optional gate for /_tcr/ control routes; request path exempts loopback. */
   apiKey: string | null;
+  /** Model for quota probe (count_tokens). */
+  probeModel?: string;
+  /** Extended thinking in probe request — affects quota headers. */
+  probeReasoning?: AnthropicProbeReasoning;
+}
+
+export type AnthropicProbeReasoning = 'off' | 'low' | 'medium' | 'high';
+
+export interface IntegrationsConfig {
+  smspool?: {
+    /** SMSPool dashboard → Settings → API key (32 chars). */
+    apiKey?: string | null;
+  };
 }
 
 export interface SupervisorConfig {
   unified: UnifiedConfig;
   openai: OpenAiConfig;
   anthropic: AnthropicConfig;
+  integrations?: IntegrationsConfig;
 }
 
 export interface UnifiedConfig {
@@ -59,10 +73,12 @@ function mergeConfig(raw: unknown): SupervisorConfig {
   const openai = (doc.openai ?? {}) as Partial<OpenAiConfig>;
   const anthropic = (doc.anthropic ?? {}) as Partial<AnthropicConfig>;
   const unified = (doc.unified ?? {}) as Partial<UnifiedConfig>;
+  const integrations = (doc.integrations ?? {}) as IntegrationsConfig;
   return {
     unified: { ...DEFAULTS.unified, ...unified },
     openai: { ...DEFAULTS.openai, ...openai },
     anthropic: { ...DEFAULTS.anthropic, ...anthropic },
+    integrations: { ...integrations },
   };
 }
 

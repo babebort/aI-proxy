@@ -1,5 +1,6 @@
 import { refreshAccessToken } from './oauth.js';
 import { maxUtilization, updateQuotaFromHeaders, type QuotaState } from './quota.js';
+import type { AnthropicProbeReasoning } from '../config.js';
 import type { AnthropicAccount } from './types.js';
 
 export interface AnthropicQuotaSnapshot {
@@ -24,6 +25,44 @@ export const PROBE_MODELS = [
   'claude-3-5-haiku-20241022',
   'claude-3-5-sonnet-20241022',
 ] as const;
+
+export interface AnthropicProbeOptions {
+  preferredModel?: string;
+  reasoning?: AnthropicProbeReasoning;
+}
+
+function reasoningBudget(reasoning: AnthropicProbeReasoning | undefined): number | null {
+  switch (reasoning) {
+    case 'low':
+      return 4096;
+    case 'medium':
+      return 8192;
+    case 'high':
+      return 16384;
+    default:
+      return null;
+  }
+}
+
+function modelsToTry(preferredModel?: string): string[] {
+  const preferred = preferredModel?.trim();
+  if (!preferred) {
+    return [...PROBE_MODELS];
+  }
+  return [preferred, ...PROBE_MODELS.filter((model) => model !== preferred)];
+}
+
+function buildProbeBody(model: string, reasoning?: AnthropicProbeReasoning): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    model,
+    messages: [{ role: 'user', content: 'ping' }],
+  };
+  const budget = reasoningBudget(reasoning);
+  if (budget) {
+    body.thinking = { type: 'enabled', budget_tokens: budget };
+  }
+  return body;
+}
 
 export function hasQuotaData(quota: QuotaState | undefined): boolean {
   if (!quota) {
@@ -62,6 +101,7 @@ async function tokenForProbe(account: AnthropicAccount): Promise<string | null> 
 async function probeWithModel(
   token: string,
   model: string,
+  reasoning?: AnthropicProbeReasoning,
 ): Promise<{ response: Response; quota: QuotaState; body: string }> {
   const response = await fetch(COUNT_TOKENS_URL, {
     method: 'POST',
@@ -70,10 +110,7 @@ async function probeWithModel(
       'anthropic-version': '2023-06-01',
       'content-type': 'application/json',
     },
-    body: JSON.stringify({
-      model,
-      messages: [{ role: 'user', content: 'ping' }],
-    }),
+    body: JSON.stringify(buildProbeBody(model, reasoning)),
     signal: AbortSignal.timeout(15_000),
   });
 
@@ -83,7 +120,10 @@ async function probeWithModel(
   return { response, quota, body };
 }
 
-export async function probeAnthropicAccount(account: AnthropicAccount): Promise<AnthropicQuotaSnapshot> {
+export async function probeAnthropicAccount(
+  account: AnthropicAccount,
+  options: AnthropicProbeOptions = {},
+): Promise<AnthropicQuotaSnapshot> {
   const base = {
     name: account.name,
     disabled: account.disabled,
@@ -103,8 +143,8 @@ export async function probeAnthropicAccount(account: AnthropicAccount): Promise<
     let lastError = 'probe failed';
     let lastQuota: QuotaState | undefined;
 
-    for (const model of PROBE_MODELS) {
-      const { response, quota, body } = await probeWithModel(token, model);
+    for (const model of modelsToTry(options.preferredModel)) {
+      const { response, quota, body } = await probeWithModel(token, model, options.reasoning);
       lastQuota = quota;
 
       if (response.ok || response.status === 429) {
@@ -164,11 +204,14 @@ export async function probeAnthropicAccount(account: AnthropicAccount): Promise<
 export async function probeAllAnthropicAccounts(
   accounts: AnthropicAccount[],
   concurrency = 3,
+  options: AnthropicProbeOptions = {},
 ): Promise<AnthropicQuotaSnapshot[]> {
   const results: AnthropicQuotaSnapshot[] = [];
   for (let i = 0; i < accounts.length; i += concurrency) {
     const batch = accounts.slice(i, i + concurrency);
-    const chunk = await Promise.all(batch.map((account) => probeAnthropicAccount(account)));
+    const chunk = await Promise.all(
+      batch.map((account) => probeAnthropicAccount(account, options)),
+    );
     results.push(...chunk);
   }
   return results;

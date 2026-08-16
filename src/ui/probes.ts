@@ -2,6 +2,7 @@ import { loadAnthropicPool } from '../anthropic/config-loader.js';
 import { probeAllAnthropicAccounts, probeAnthropicAccount } from '../anthropic/quota-probe.js';
 import type { AnthropicAccount } from '../anthropic/types.js';
 import { loadConfig, loadCodexerAccounts, readCodexerGroupApi } from '../config.js';
+import type { AnthropicProbeReasoning } from '../config.js';
 import { parseOpenAiJwtMeta } from '../openai/jwt-meta.js';
 import { probeAllOpenAiAccounts, probeOpenAiAccount } from '../openai/quota-probe.js';
 import { promises as fs } from 'node:fs';
@@ -60,6 +61,10 @@ export async function probeAccountsPayload(options?: {
   }
 
   const probeOne = options?.provider && options.id;
+  const probeOpts = {
+    preferredModel: config.anthropic.probeModel,
+    reasoning: config.anthropic.probeReasoning,
+  };
   let openai = probeOne && options.provider !== 'openai'
     ? []
     : probeOne
@@ -68,8 +73,8 @@ export async function probeAccountsPayload(options?: {
   let anthropic = probeOne && options.provider !== 'anthropic'
     ? []
     : probeOne
-      ? await probeOneAnthropic(anthropicPool, options.id!)
-      : await probeAllAnthropicAccounts(anthropicPool);
+      ? await probeOneAnthropic(anthropicPool, options.id!, probeOpts)
+      : await probeAllAnthropicAccounts(anthropicPool, 3, probeOpts);
 
   const key =
     (await readCodexerGroupApi(config.openai.configFile)) ?? config.openai.apiKey ?? '';
@@ -99,10 +104,14 @@ async function probeOneOpenAi(
   return [await probeOpenAiAccount(account)];
 }
 
-async function probeOneAnthropic(accounts: AnthropicAccount[], name: string) {
+async function probeOneAnthropic(
+  accounts: AnthropicAccount[],
+  name: string,
+  probeOpts: { preferredModel?: string; reasoning?: AnthropicProbeReasoning },
+) {
   const account = accounts.find((row) => row.name === name);
   if (!account) {
     return [{ name, ok: false, error: 'account not found' }];
   }
-  return [await probeAnthropicAccount(account)];
+  return [await probeAnthropicAccount(account, probeOpts)];
 }
