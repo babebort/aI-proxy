@@ -8,6 +8,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"time"
 
 	"gpt_server/internal/auth"
 	"gpt_server/internal/config"
@@ -26,27 +27,18 @@ func runAuth(ctx context.Context, stdin io.Reader, stdout io.Writer, store *conf
 		return err
 	}
 	style.Title(stdout, "interactive auth")
-	style.Info(stdout, "open this oauth link in your browser:")
-	_, _ = fmt.Fprintln(stdout, authURL)
 
-	scanner := bufio.NewScanner(stdin)
-	prompt(stdout, "paste returned code or callback url")
-	line, err := scanRequired(scanner, "oauth code was not provided")
+	code, err := acquireOAuthCode(ctx, stdin, stdout, style, session, authURL)
 	if err != nil {
 		return err
 	}
-	code, state, err := auth.ParseCodeInput(line)
-	if err != nil {
-		return err
-	}
-	if state != "" && state != session.State {
-		return errors.New("oauth state mismatch")
-	}
+
 	tokens, err := oauth.ExchangeCode(ctx, session, code)
 	if err != nil {
 		return err
 	}
 
+	scanner := bufio.NewScanner(stdin)
 	group, createNew, err := chooseGroup(scanner, stdout, store)
 	if err != nil {
 		return err
@@ -70,6 +62,64 @@ func runAuth(ctx context.Context, stdin io.Reader, stdout io.Writer, store *conf
 	_, _ = fmt.Fprintf(stdout, "config: %s\n", store.Path)
 	printAuthSummary(stdout, group, user)
 	return nil
+}
+
+func acquireOAuthCode(ctx context.Context, stdin io.Reader, stdout io.Writer, style styler, session auth.OAuthSession, authURL string) (string, error) {
+	callbackCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+
+	resultCh := make(chan auth.CallbackResult, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		res, waitErr := auth.WaitForOAuthCallback(callbackCtx, session.RedirectURI, session.State)
+		if waitErr != nil {
+			errCh <- waitErr
+			return
+		}
+		resultCh <- res
+	}()
+
+	// Brief pause so the listener binds before the browser hits redirect_uri.
+	time.Sleep(150 * time.Millisecond)
+
+	style.Info(stdout, "callback server listening on "+session.RedirectURI)
+	if openErr := openBrowser(authURL); openErr != nil {
+		style.Info(stdout, "could not open browser automatically — open this link manually:")
+		_, _ = fmt.Fprintln(stdout, authURL)
+	} else {
+		style.Info(stdout, "browser opened — complete login there")
+	}
+
+	select {
+	case res := <-resultCh:
+		style.OK(stdout, "callback received")
+		return res.Code, nil
+	case waitErr := <-errCh:
+		style.Info(stdout, "auto callback failed: "+waitErr.Error())
+		return readOAuthCodeManual(stdin, stdout, style, session, authURL)
+	case <-callbackCtx.Done():
+		return "", callbackCtx.Err()
+	}
+}
+
+func readOAuthCodeManual(stdin io.Reader, stdout io.Writer, style styler, session auth.OAuthSession, authURL string) (string, error) {
+	style.Info(stdout, "open this oauth link in your browser:")
+	_, _ = fmt.Fprintln(stdout, authURL)
+
+	scanner := bufio.NewScanner(stdin)
+	prompt(stdout, "paste returned code or callback url")
+	line, err := scanRequired(scanner, "oauth code was not provided")
+	if err != nil {
+		return "", err
+	}
+	code, state, err := auth.ParseCodeInput(line)
+	if err != nil {
+		return "", err
+	}
+	if state != "" && state != session.State {
+		return "", errors.New("oauth state mismatch")
+	}
+	return code, nil
 }
 
 func chooseGroup(scanner *bufio.Scanner, stdout io.Writer, store *config.Store) (config.Group, bool, error) {

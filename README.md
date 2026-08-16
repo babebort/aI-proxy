@@ -46,7 +46,7 @@ npm run install-binaries   # codexer + tcr → resources/bin/
 ### 2. OpenAI — добавить ChatGPT-аккаунты
 
 ```bash
-npx ai-proxy openai login    # OAuth в браузере
+npx ai-proxy openai login    # OAuth в браузере (callback ловится сам на :1455)
 npx ai-proxy openai login    # второй аккаунт, третий…
 ```
 
