@@ -1,7 +1,7 @@
 {
   "name": "ai-proxy",
-  "version": "0.1.0",
-  "description": "Local dual-provider proxy: OpenAI (codexer) + Anthropic (teamclaude-rs) with multi-account autobalance.",
+  "version": "0.2.0",
+  "description": "Unified local proxy: OpenAI (codexer) + Anthropic (native pool) on one port.",
   "type": "module",
   "bin": {
     "ai-proxy": "./dist/cli.js"

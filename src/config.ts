@@ -24,11 +24,22 @@ export interface AnthropicConfig {
 }
 
 export interface SupervisorConfig {
+  unified: UnifiedConfig;
   openai: OpenAiConfig;
   anthropic: AnthropicConfig;
 }
 
+export interface UnifiedConfig {
+  /** Single public listener (OpenAI + Anthropic routes). */
+  port: number;
+  enabled: boolean;
+}
+
 const DEFAULTS: SupervisorConfig = {
+  unified: {
+    port: 8787,
+    enabled: true,
+  },
   openai: {
     port: 9090,
     configFile: defaultCodexerConfig(),
@@ -46,7 +57,9 @@ function mergeConfig(raw: unknown): SupervisorConfig {
   const doc = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const openai = (doc.openai ?? {}) as Partial<OpenAiConfig>;
   const anthropic = (doc.anthropic ?? {}) as Partial<AnthropicConfig>;
+  const unified = (doc.unified ?? {}) as Partial<UnifiedConfig>;
   return {
+    unified: { ...DEFAULTS.unified, ...unified },
     openai: { ...DEFAULTS.openai, ...openai },
     anthropic: { ...DEFAULTS.anthropic, ...anthropic },
   };

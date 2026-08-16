@@ -2,33 +2,36 @@
 
 Локальный прокси для **двух провайдеров по подписке** (OAuth, не API keys).
 
-Один CLI поднимает оба бэкенда, хранит пул аккаунтов и **автобалансирует** запросы между ними. Клиенты (BB, Cursor, скрипты) ходят на localhost — отдельный `~/codexer`, LaunchAgent и ручное `claude auth login` при лимите не нужны.
+**v0.2 — unified server:** один порт `:8787` для OpenAI и Anthropic. OpenAI — codexer (internal `:9090`), Anthropic — **native pool** (round-robin + retry на 429), без runtime-зависимости от teamclaude-rs.
 
-| Провайдер | Бэкенд (встроен) | Порт | Тип аккаунтов |
-|-----------|------------------|------|---------------|
-| **OpenAI / Codex** | [codexer](https://github.com/vladvlsu/codexer) | `:9090` | ChatGPT OAuth (Free / Plus / Pro / Team) |
-| **Anthropic / Claude** | [teamclaude-rs](https://github.com/dhkts1/teamclaude-rs) (`tcr`) | `:3456` | Claude OAuth (Pro / Max) |
+| Маршрут | Куда | Аккаунты |
+|---------|------|----------|
+| `POST /v1/chat/completions` | codexer → ChatGPT | `~/codexer/config.yml` |
+| `POST /v1/messages` | native → api.anthropic.com | `~/.config/teamclaude.json` |
+| **Публичный порт** | **`http://127.0.0.1:8787`** | один `ai-proxy env` |
 
 ---
 
 ## Зачем это нужно
 
-**Было (OpenAI):** отдельный `~/codexer`, бинарник, LaunchAgent `com.bortnik.codexer`, ручной `setup-codexer.sh`.
+**Было (OpenAI):** отдельный `~/codexer`, LaunchAgent, ручной setup.
 
-**Было (Anthropic):** `claude auth login` → один аккаунт → лимит → вручную переключить аккаунт → BB снова работает.
+**Было (Anthropic):** `claude auth login` → лимит → вручную другой аккаунт.
 
-**Стало:** один `ai-proxy start`, пул аккаунтов на каждой стороне, прокси сам миксует нагрузку и переключается при 429 / при приближении к квоте.
+**Стало:** `ai-proxy start` → один URL, пул аккаунтов, автобалансировка.
 
 ```
 BB / Cursor / скрипты
         │
         ▼
-   ai-proxy (supervisor)
-   ├── codexer      → :9090 → ChatGPT backend (Codex)
-   └── teamclaude   → :3456 → api.anthropic.com
+   ai-proxy :8787  (единый Node-сервер)
+   ├── /v1/chat/completions → codexer :9090 (internal)
+   └── /v1/messages         → Anthropic pool (native)
         │
-   [acc1] [acc2] [acc3] …   ← OAuth-подписки, не API keys
+   [ChatGPT accs…]  [Claude accs…]
 ```
+
+**teamclaude / tcr** — только для `anthropic login` (OAuth в браузере пишет `teamclaude.json`). В runtime v0.2 **не нужен**.
 
 ---
 
@@ -56,28 +59,28 @@ npx ai-proxy openai login    # второй аккаунт в ту же груп
 
 ### 2. Anthropic — добавить Claude-аккаунты
 
-Сначала установи `tcr`, если его ещё нет:
+OAuth через `tcr login` (один раз поставить [teamclaude-rs](https://github.com/dhkts1/teamclaude-rs)):
 
 ```bash
 curl --proto '=https' --tlsv1.2 -LsSf \
   https://github.com/dhkts1/teamclaude-rs/releases/latest/download/teamclaude-rs-installer.sh | sh
 
-npm run install-binaries   # скопирует tcr в resources/bin/
-```
-
-```bash
-npx ai-proxy anthropic login   # OAuth, как claude auth login
+npx ai-proxy anthropic login   # пишет ~/.config/teamclaude.json
 npx ai-proxy anthropic login   # второй, третий аккаунт…
+npx ai-proxy anthropic accounts
 ```
 
-Конфиг аккаунтов: `~/.config/teamclaude.json`.
+После login **tcr в runtime не нужен** — пул читает JSON напрямую.
 
 ### 3. Запуск
 
 ```bash
 npx ai-proxy start
 npx ai-proxy status
+eval "$(npx ai-proxy env)"   # один export для BB и codexer
 ```
+
+Legacy (два порта + tcr runtime): `npx ai-proxy start --legacy`
 
 Остановка:
 
@@ -89,27 +92,18 @@ npx ai-proxy stop
 
 ## Env для клиентов
 
-### OpenAI / Codex (audit judge, скрипты)
-
 ```bash
-npx ai-proxy openai-env
-# export OPENAI_BASE_URL=http://127.0.0.1:9090/v1
-# export OPENAI_API_KEY=<group.api из ~/codexer/config.yml>
-# export CODEXER_API_KEY=<тот же ключ>
+npx ai-proxy env
 ```
 
-Или положи ключ в `~/CODEXER_API_KEY.txt` — так делают audit-скрипты Longeva.
-
-### Anthropic / Claude (BB, Claude Code, Cursor)
-
 ```bash
-npx ai-proxy anthropic env
-# export ANTHROPIC_BASE_URL=http://127.0.0.1:3456
+export AI_PROXY_URL=http://127.0.0.1:8787
+export OPENAI_BASE_URL=http://127.0.0.1:8787/v1
+export OPENAI_API_KEY=<group.api из ~/codexer/config.yml>
+export CODEXER_API_KEY=<тот же>
+export ANTHROPIC_BASE_URL=http://127.0.0.1:8787
+# ANTHROPIC_API_KEY не ставить для Claude Code
 ```
-
-**Не ставь `ANTHROPIC_API_KEY`** для Claude Code — teamclaude-rs сам подставляет OAuth-токен нужного аккаунта из пула. API key в env отключит claude.ai-коннекторы.
-
-Для SDK-клиентов на loopback ключ прокси не обязателен (127.0.0.1 exempt).
 
 ---
 
@@ -162,13 +156,11 @@ npx ai-proxy anthropic env
 - При `usage_limit_reached` / 429 — fallback на следующий аккаунт.
 - ≥2 аккаунта → автоматически `--multiuser`; 1 аккаунт → `--singleuser`.
 
-### Anthropic (teamclaude-rs)
+### Anthropic (native v0.2)
 
-- Читает quota headers на **каждом** ответе.
-- `switchThreshold: 0.95` — уходит с аккаунта, когда тот на 95% 5h/7d лимита.
-- 429 / 529 / transport error — retry на другом аккаунте.
-- OAuth refresh в фоне (токены не протухают посреди сессии).
-- `sessionAffinity: true` — одна беседа остаётся на одном аккаунте (prompt cache); параллельные BB-агенты естественно разъезжаются по разным аккаунтам.
+- Round-robin по активным аккаунтам в `~/.config/teamclaude.json`.
+- 429 / 529 / 502 / 503 — retry на другом аккаунте (до 4 попыток).
+- **TODO:** quota headers (`switchThreshold 0.95`) и OAuth refresh — как в teamclaude-rs.
 
 ---
 
@@ -176,21 +168,18 @@ npx ai-proxy anthropic env
 
 ```
 aI-proxy/
-├── src/                    # supervisor CLI (TypeScript)
-├── resources/bin/
-│   ├── codexer             # bundled OpenAI gateway (~10 MB)
-│   └── tcr                 # bundled Anthropic gateway
+├── src/
+│   ├── server/unified.ts    # :8787 — /v1/messages + forward OpenAI
+│   ├── anthropic/           # native pool + proxy
+│   └── openai/forward.ts    # → codexer :9090
+├── resources/bin/codexer
 └── scripts/install-binaries.sh
 
 ~/.config/ai-proxy/
-├── config.yml              # порты, proxy api keys supervisor
-├── run/openai.json         # PID codexer
-├── run/anthropic.json      # PID tcr
-└── logs/openai.log
-    logs/anthropic.log
-
-~/codexer/config.yml         # OpenAI OAuth accounts (legacy path, reused)
-~/.config/teamclaude.json   # Anthropic OAuth accounts
+├── config.yml
+├── run/unified.json
+├── run/openai.json
+└── logs/
 ```
 
 ### Supervisor config (`~/.config/ai-proxy/config.yml`)
@@ -198,15 +187,15 @@ aI-proxy/
 Генерируется при первом `start`. Пример:
 
 ```yaml
+unified:
+  port: 8787
+  enabled: true
 openai:
-  port: 9090
-  configFile: /Users/you/codexer/config.yml
-  gid: cfe83f1b603c9dfef46e8ea3eca0eac2bfb59411a7687a405a05eb4c483f3949
-  apiKey: aip-openai-<random>   # для клиентов; реальный bearer = group.api в codexer config
+  port: 9090          # internal only
+  configFile: ~/codexer/config.yml
+  gid: cfe83f1b...
 anthropic:
-  port: 3456
-  configFile: /Users/you/.config/teamclaude.json
-  apiKey: aip-anthropic-<random>  # gate для /_tcr/ control routes
+  configFile: ~/.config/teamclaude.json
 ```
 
 ---
@@ -214,36 +203,23 @@ anthropic:
 ## Команды
 
 ```
-ai-proxy start [--foreground]   # поднять оба бэкенда
-ai-proxy stop                     # остановить
-ai-proxy status                   # health + pid
-
-ai-proxy openai login             # codexer auth (новый ChatGPT аккаунт)
-ai-proxy openai key               # bearer для клиентов
-ai-proxy openai-env               # export OPENAI_* / CODEXER_*
-
-ai-proxy anthropic login          # tcr login (новый Claude аккаунт)
-ai-proxy anthropic accounts       # список аккаунтов в пуле
-ai-proxy anthropic env            # export ANTHROPIC_BASE_URL
-
-ai-proxy config-path              # путь к supervisor config
+ai-proxy start [--foreground] [--legacy]
+ai-proxy stop | status | env | config-path
+ai-proxy openai login | key | openai-env
+ai-proxy anthropic login | accounts
 ```
 
 ---
 
 ## Embed vs один сервер
 
-| | **Embed codexer + tcr** (выбрано) | **Портировать в один Go/Node** |
-|---|---|---|
-| Срок | дни | недели |
-| OAuth / refresh / 429 | уже решено upstream | писать с нуля |
-| Обновления | bump бинарника | merge upstream fixes вручную |
-| Процессы | 2 child + supervisor | 1 процесс |
-| Конфиг | 2 файла (+ unified CLI) | 1 файл |
-| Порты | 9090 + 3456 | можно один :8080 |
-| Риск | coupling версий | bugs в своей OAuth-логике |
+| | v0.1 embed | **v0.2 unified (сейчас)** | Go monolith (TODO) |
+|---|---|---|---|
+| Клиентский порт | 9090 + 3456 | **8787** | 8787 |
+| Anthropic runtime | teamclaude-rs | native Node | native Go |
+| OpenAI | codexer binary | codexer child | import codexer packages |
 
-**Почему embed:** codexer и teamclaude-rs уже умеют OAuth подписок, quota headers и rotation. AI-proxy = тонкий supervisor + единый CLI. Портирование в один сервер — позже, если понадобится один порт; OAuth-логику дублировать не стоит.
+`--legacy` = старый dual-port + tcr.
 
 ---
 
@@ -286,21 +262,11 @@ Workflow `.bb/workflows/codexer-audit-queue.js`:
 | `codexarion` | `:9090` + `group.api` из `~/codexer/config.yml` (multiuser pool) |
 | `grok` | Cursor Grok (codexer не используется) |
 
-Для дешёвого judge на OpenAI:
-
 ```bash
 ai-proxy start
-eval "$(npx ai-proxy openai-env)"
-# BB / audit → POST http://127.0.0.1:9090/v1/chat/completions
-```
-
-Для Anthropic (оркестратор BB):
-
-```bash
-ai-proxy start
-eval "$(npx ai-proxy anthropic env)"
-# Claude Code / BB → ANTHROPIC_BASE_URL=http://127.0.0.1:3456
-# Ручной claude auth login при лимите больше не нужен
+eval "$(npx ai-proxy env)"
+# OpenAI judge  → POST http://127.0.0.1:8787/v1/chat/completions
+# Anthropic/BB  → ANTHROPIC_BASE_URL=http://127.0.0.1:8787
 ```
 
 ---
@@ -322,7 +288,7 @@ Codexarion заменён этим репо. Electron, чаты и agent workspa
 
 1. `ai-proxy anthropic login` для каждого аккаунта (wigiwork, wilka, zelen…)
 2. `ai-proxy start`
-3. `eval "$(npx ai-proxy anthropic env)"` в shell / BB env
+3. `eval "$(npx ai-proxy env)"` в shell / BB env
 4. Больше не нужно `claude auth login` при каждом лимите
 
 ---
@@ -345,7 +311,9 @@ Codexarion заменён этим репо. Electron, чаты и agent workspa
 
 **9090 down** → `ai-proxy status`, смотри `~/.config/ai-proxy/logs/openai.log`.
 
-**3456 down** → `~/.config/ai-proxy/logs/anthropic.log`, проверь `~/.config/teamclaude.json` не пуст.
+**8787 down** → `ai-proxy status`, логи `~/.config/ai-proxy/logs/unified.log`.
+
+**Пустой Anthropic pool** → `ai-proxy anthropic login`.
 
 **401 на codexer** → протух OAuth; `ai-proxy openai login` для проблемного аккаунта.
 

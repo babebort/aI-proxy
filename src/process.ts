@@ -16,7 +16,7 @@ export interface StartOptions {
   foreground?: boolean;
 }
 
-async function writePid(name: string, pid: number, port: number): Promise<void> {
+export async function writePidFile(name: string, pid: number, port: number): Promise<void> {
   await fs.mkdir(runDir(), { recursive: true, mode: 0o700 });
   const file = path.join(runDir(), `${name}.json`);
   const body = JSON.stringify({ pid, port, startedAt: new Date().toISOString() }, null, 2);
@@ -95,10 +95,11 @@ export async function startCodexer(
 
   const configDir = path.dirname(config.configFile);
   const userCount = await countCodexerUsers(config.configFile, config.gid);
+  const portArg = ['--port', String(config.port)];
   const modeArgs =
     userCount >= 2
-      ? ['server', '--multiuser', '--gid', config.gid]
-      : ['server', '--singleuser', '--gid', config.gid, '--alias', 'default'];
+      ? ['server', '--multiuser', '--gid', config.gid, ...portArg]
+      : ['server', '--singleuser', '--gid', config.gid, '--alias', 'default', ...portArg];
 
   const child = spawnLogged('openai', binary, modeArgs, {
     cwd: configDir,
@@ -109,7 +110,7 @@ export async function startCodexer(
     throw new Error('codexer failed to start');
   }
 
-  await writePid('openai', child.pid, config.port);
+  await writePidFile('openai', child.pid, config.port);
   return {
     name: 'openai',
     pid: child.pid,
@@ -137,7 +138,7 @@ export async function startAnthropic(
     throw new Error('teamclaude-rs (tcr) failed to start');
   }
 
-  await writePid('anthropic', child.pid, config.port);
+  await writePidFile('anthropic', child.pid, config.port);
   return {
     name: 'anthropic',
     pid: child.pid,
@@ -160,6 +161,28 @@ async function countCodexerUsers(configFile: string, gid: string): Promise<numbe
     // fall through
   }
   return 0;
+}
+
+export async function startUnifiedDaemon(daemonScript: string, publicPort: number): Promise<ManagedProcess> {
+  const existing = await readManaged('unified');
+  if (existing) {
+    return existing;
+  }
+
+  const child = spawnLogged('unified', process.execPath, [daemonScript], {
+    foreground: false,
+  });
+  if (!child.pid) {
+    throw new Error('unified daemon failed to start');
+  }
+
+  await writePidFile('unified', child.pid, publicPort);
+  return {
+    name: 'unified',
+    pid: child.pid,
+    port: publicPort,
+    logFile: path.join(logDir(), 'unified.log'),
+  };
 }
 
 export async function runInteractive(
