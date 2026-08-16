@@ -312,6 +312,45 @@ tr:last-child td { border-bottom: 0; }
 }
 .badge.ok { color: var(--success); }
 .badge.no { color: var(--error); }
+.badge.pending { color: var(--accent); }
+
+.oauth-modal {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 0;
+  max-width: 440px;
+  width: calc(100vw - 32px);
+  background: var(--panel);
+  color: var(--ink);
+  box-shadow: 0 24px 60px rgba(0,0,0,.25);
+}
+.oauth-modal::backdrop {
+  background: rgba(0,0,0,.45);
+}
+.oauth-modal form { padding: 18px; display: grid; gap: 14px; }
+.oauth-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.oauth-head h2 { margin: 0; font-size: 18px; }
+.oauth-step { display: grid; gap: 12px; }
+.field { display: grid; gap: 6px; }
+.field span { font-size: 12px; color: var(--muted); }
+.field input, .field select {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+}
+.oauth-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.oauth-link { font-size: 13px; word-break: break-all; }
+.oauth-status-line.ok { color: var(--success); }
+.oauth-error { color: var(--error); font-size: 13px; margin: 0; }
+.hidden { display: none !important; }
 
 .env-block { display: grid; gap: 8px; }
 .env-row {

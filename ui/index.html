@@ -14,7 +14,7 @@
 </head>
 <body>
   <div id="install-banner" class="install-banner hidden">
-    <span>Установи как приложение — иконка в Dock / Launchpad</span>
+    <span>Нативная обёртка: <code>npm run install-app</code> → AI Proxy.app в Applications</span>
     <div class="install-actions">
       <button type="button" id="btn-install" class="primary">Установить</button>
       <button type="button" id="install-dismiss" class="ghost">×</button>
@@ -87,7 +87,7 @@
         <div class="section-head">
           <div>
             <h2>Anthropic / Claude</h2>
-            <p class="muted">OAuth pool · 5h / 7d windows</p>
+            <p class="muted">OAuth pool · 5h / 7d windows · пока через Terminal</p>
           </div>
           <button type="button" id="btn-anthropic-login" class="secondary">+ Добавить аккаунт</button>
         </div>
@@ -102,6 +102,56 @@
   </main>
 
   <div id="toast" class="toast hidden"></div>
+
+  <dialog id="oauth-modal" class="oauth-modal">
+    <form method="dialog" id="oauth-form">
+      <header class="oauth-head">
+        <h2 id="oauth-title">Добавить ChatGPT аккаунт</h2>
+        <button type="button" id="oauth-close" class="ghost" aria-label="Закрыть">×</button>
+      </header>
+
+      <div id="oauth-step-setup" class="oauth-step">
+        <label class="field">
+          <span>Alias</span>
+          <input id="oauth-alias" name="alias" required placeholder="work / personal" autocomplete="off">
+        </label>
+        <label class="field">
+          <span>Группа</span>
+          <select id="oauth-group" name="group"></select>
+        </label>
+        <label class="field hidden" id="oauth-new-group-wrap">
+          <span>Название новой группы</span>
+          <input id="oauth-new-group" name="newGroup" placeholder="default" autocomplete="off">
+        </label>
+        <p class="muted small">Откроется окно auth.openai.com — после входа вернись сюда автоматически.</p>
+        <div class="oauth-actions">
+          <button type="button" id="oauth-begin" class="primary">Войти через ChatGPT</button>
+        </div>
+      </div>
+
+      <div id="oauth-step-wait" class="oauth-step hidden">
+        <p class="oauth-status-line">Жду авторизацию в браузере…</p>
+        <a id="oauth-link" class="oauth-link" href="#" target="_blank" rel="noopener">Открыть ссылку снова</a>
+        <label class="field">
+          <span>Или вставь callback URL / code</span>
+          <input id="oauth-paste" name="paste" placeholder="http://localhost:1455/auth/callback?code=…" autocomplete="off">
+        </label>
+        <div class="oauth-actions">
+          <button type="button" id="oauth-submit-paste" class="secondary">Отправить код</button>
+        </div>
+      </div>
+
+      <div id="oauth-step-done" class="oauth-step hidden">
+        <p class="oauth-status-line ok" id="oauth-done-text">Аккаунт добавлен.</p>
+        <div class="oauth-actions">
+          <button type="button" id="oauth-done-close" class="primary">Готово</button>
+        </div>
+      </div>
+
+      <p id="oauth-error" class="oauth-error hidden"></p>
+    </form>
+  </dialog>
+
   <script src="/app.js" type="module"></script>
 </body>
 </html>

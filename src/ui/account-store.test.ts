@@ -4,6 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  addCodexerUser,
   needsAccountReauth,
   removeAnthropicAccount,
   removeCodexerUser,
@@ -14,6 +15,30 @@ test('needsAccountReauth detects missing account id and auth failures', () => {
   assert.equal(needsAccountReauth('HTTP 401: bad'), true);
   assert.equal(needsAccountReauth(undefined), false);
   assert.equal(needsAccountReauth('HTTP 500'), false);
+});
+
+test('addCodexerUser appends to existing group', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'ai-proxy-'));
+  const file = path.join(dir, 'config.yml');
+  await writeFile(
+    file,
+    `groups:
+  - gname: main
+    gid: g1
+    api: gsg_test
+    users: []
+`,
+    'utf8',
+  );
+  const saved = await addCodexerUser(file, {
+    alias: 'alice',
+    oauthCode: 'code1',
+    tokens: { access_token: 'tok', id_token: 'id.tok.sig' },
+    gid: 'g1',
+  });
+  assert.equal(saved.alias, 'alice');
+  assert.match(await readFile(file, 'utf8'), /alias: alice/);
+  await rm(dir, { recursive: true, force: true });
 });
 
 test('removeCodexerUser drops matching uuid', async () => {

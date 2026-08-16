@@ -11,7 +11,10 @@ let lastStatus = null;
 let lastProbe = null;
 let probing = false;
 const probingAccounts = new Set();
+const pendingProbeKeys = new Set();
 let installPrompt = null;
+let oauthSessionId = null;
+let oauthPollTimer = null;
 
 function toast(msg) {
   const el = $('#toast');
@@ -144,15 +147,18 @@ function renderOpenAiAccounts(statusAccounts, probeAccounts) {
       const email = probe?.email ?? account.email ?? '';
       const plan = probe?.planType ?? account.planType ?? '—';
       const spinning = probingAccounts.has(`openai:${id}`);
+      const pending = pendingProbeKeys.has(`openai:${id}`);
       const limitBadge = probe?.limitReached
         ? '<span class="badge no">limit</span>'
         : probe?.ok
           ? '<span class="badge ok">live</span>'
           : probe?.error
             ? `<span class="badge no" title="${esc(probe.error)}">err</span>`
-            : account.hasToken
-              ? '<span class="badge">offline</span>'
-              : '<span class="badge no">no token</span>';
+            : spinning || pending
+              ? '<span class="badge pending">…</span>'
+              : account.hasToken
+                ? '<span class="badge pending">new</span>'
+                : '<span class="badge no">no token</span>';
 
       let quotaHtml = '';
       if (probe?.ok) {
@@ -218,13 +224,16 @@ function renderAnthropicAccounts(statusAccounts, probeAccounts) {
       const probe = probeMap.get(account.name);
       const disabled = account.disabled;
       const spinning = probingAccounts.has(`anthropic:${account.name}`);
+      const pending = pendingProbeKeys.has(`anthropic:${account.name}`);
       const badge = disabled
         ? '<span class="badge no">disabled</span>'
         : probe?.ok
           ? '<span class="badge ok">live</span>'
           : probe?.error
             ? `<span class="badge no" title="${esc(probe.error)}">err</span>`
-            : '<span class="badge">offline</span>';
+            : spinning || pending
+              ? '<span class="badge pending">…</span>'
+              : '<span class="badge pending">new</span>';
 
       let quotaHtml = '';
       if (probe?.ok && probe.quota) {
@@ -329,6 +338,53 @@ async function api(path, opts) {
   return body;
 }
 
+function probeMapFor(provider) {
+  const list = provider === 'openai' ? lastProbe?.openai : lastProbe?.anthropic;
+  const map = new Map();
+  for (const row of list ?? []) {
+    if (provider === 'openai') {
+      map.set(row.uuid || row.alias, row);
+      if (row.uuid) map.set(row.alias, row);
+    } else {
+      map.set(row.name, row);
+    }
+  }
+  return map;
+}
+
+function accountsMissingProbe() {
+  const missing = [];
+  for (const account of lastStatus?.openaiAccounts ?? []) {
+    const id = account.uuid || account.alias;
+    const key = `openai:${id}`;
+    if (!account.hasToken || probingAccounts.has(key) || pendingProbeKeys.has(key)) continue;
+    const probe = probeMapFor('openai').get(account.uuid) ?? probeMapFor('openai').get(account.alias);
+    if (!probe) missing.push(['openai', id]);
+  }
+  for (const account of lastStatus?.anthropicAccounts ?? []) {
+    if (account.disabled) continue;
+    const key = `anthropic:${account.name}`;
+    if (probingAccounts.has(key) || pendingProbeKeys.has(key)) continue;
+    if (!probeMapFor('anthropic').has(account.name)) {
+      missing.push(['anthropic', account.name]);
+    }
+  }
+  return missing;
+}
+
+async function autoProbeMissing() {
+  const missing = accountsMissingProbe();
+  for (const [provider, id] of missing) {
+    pendingProbeKeys.add(`${provider}:${id}`);
+  }
+  if (missing.length) {
+    renderAccountsView();
+  }
+  for (const [provider, id] of missing) {
+    await probeAccount(provider, id, { quiet: true });
+  }
+}
+
 async function refresh() {
   try {
     lastStatus = await api('/api/status');
@@ -344,6 +400,7 @@ async function refresh() {
 
     renderEnv(lastStatus.env);
     renderAccountsView();
+    void autoProbeMissing();
 
     $('#btn-start').disabled = lastStatus.unified.up;
     $('#btn-stop').disabled = !lastStatus.unified.running && !lastStatus.codexer.running;
@@ -371,6 +428,15 @@ async function probeLimits() {
 }
 
 async function reauthAccount(provider, id, alias) {
+  if (provider === 'openai') {
+    const account = lastStatus?.openaiAccounts?.find((row) => row.uuid === id || row.alias === id);
+    openOAuthModal({
+      title: `Reauth ${alias || id}`,
+      alias: alias || account?.alias || id,
+      reauth: { uuid: account?.uuid || id, gid: account?.gid },
+    });
+    return;
+  }
   try {
     const data = await api('/api/accounts/reauth', {
       method: 'POST',
@@ -387,10 +453,11 @@ async function reauthAccount(provider, id, alias) {
   }
 }
 
-async function probeAccount(provider, id) {
+async function probeAccount(provider, id, opts = {}) {
   const key = `${provider}:${id}`;
   if (probingAccounts.has(key)) return;
   probingAccounts.add(key);
+  pendingProbeKeys.delete(key);
   renderAccountsView();
   try {
     const payload = await api('/api/accounts/probe', {
@@ -399,11 +466,12 @@ async function probeAccount(provider, id) {
     });
     mergeProbeResult(payload);
     renderAccountsView();
-    toast(`${id}: обновлено`);
+    if (!opts.quiet) toast(`${id}: обновлено`);
   } catch (err) {
-    toast(err.message ?? 'Probe failed');
+    if (!opts.quiet) toast(err.message ?? 'Probe failed');
   } finally {
     probingAccounts.delete(key);
+    pendingProbeKeys.delete(key);
     renderAccountsView();
   }
 }
@@ -432,16 +500,210 @@ async function stopProxy() {
 }
 
 async function login(kind) {
+  if (kind === 'openai') {
+    openOAuthModal();
+    return;
+  }
   try {
     const data = await api(`/api/login/${kind}`, { method: 'POST', body: '{}' });
     if (data.terminal) {
       toast('Terminal открыт — заверши OAuth там, потом ↻ на аккаунте');
     } else {
-      toast('OAuth только через Terminal (macOS)');
+      toast('Claude OAuth пока через Terminal (macOS)');
     }
   } catch (err) {
     toast(err.message ?? 'Login');
   }
+}
+
+function oauthEl(id) {
+  return document.getElementById(id);
+}
+
+function setOAuthStep(step) {
+  for (const name of ['setup', 'wait', 'done']) {
+    oauthEl(`oauth-step-${name}`).classList.toggle('hidden', name !== step);
+  }
+  oauthEl('oauth-error').classList.add('hidden');
+}
+
+function setOAuthError(message) {
+  const el = oauthEl('oauth-error');
+  if (!message) {
+    el.classList.add('hidden');
+    el.textContent = '';
+    return;
+  }
+  el.textContent = message;
+  el.classList.remove('hidden');
+}
+
+async function loadOAuthGroups(selectedGid) {
+  const select = oauthEl('oauth-group');
+  const { groups } = await api('/api/login/openai/groups');
+  select.innerHTML = '';
+  for (const group of groups) {
+    const opt = document.createElement('option');
+    opt.value = group.gid;
+    opt.textContent = `${group.gname} (${group.userCount})`;
+    select.appendChild(opt);
+  }
+  const createOpt = document.createElement('option');
+  createOpt.value = '__new__';
+  createOpt.textContent = '+ Новая группа';
+  select.appendChild(createOpt);
+  if (selectedGid && groups.some((group) => group.gid === selectedGid)) {
+    select.value = selectedGid;
+  } else if (!groups.length) {
+    select.value = '__new__';
+  }
+  oauthEl('oauth-new-group-wrap').classList.toggle('hidden', select.value !== '__new__');
+}
+
+function stopOAuthPoll() {
+  if (oauthPollTimer) {
+    clearInterval(oauthPollTimer);
+    oauthPollTimer = null;
+  }
+}
+
+async function pollOAuthSession() {
+  if (!oauthSessionId) return;
+  try {
+    const data = await api(`/api/login/openai/status/${oauthSessionId}`);
+    if (data.status === 'done' && data.account) {
+      stopOAuthPoll();
+      setOAuthStep('done');
+      oauthEl('oauth-done-text').textContent = `Аккаунт ${data.account.alias} добавлен.`;
+      await refresh();
+      const probeId = data.account.uuid || data.account.alias;
+      pendingProbeKeys.add(`openai:${probeId}`);
+      renderAccountsView();
+      await probeAccount('openai', probeId, { quiet: true });
+      toast(`${data.account.alias}: лимиты подтянуты`);
+      return;
+    }
+    if (data.status === 'error') {
+      stopOAuthPoll();
+      setOAuthError(data.error ?? 'OAuth failed');
+      setOAuthStep('wait');
+    }
+  } catch (err) {
+    setOAuthError(err.message ?? 'Poll failed');
+  }
+}
+
+function openOAuthModal(opts = {}) {
+  const modal = oauthEl('oauth-modal');
+  oauthSessionId = null;
+  stopOAuthPoll();
+  setOAuthStep('setup');
+  setOAuthError('');
+  oauthEl('oauth-title').textContent = opts.title ?? 'Добавить ChatGPT аккаунт';
+  oauthEl('oauth-alias').value = opts.alias ?? '';
+  oauthEl('oauth-paste').value = '';
+  oauthEl('oauth-form').dataset.reauthUuid = opts.reauth?.uuid ?? '';
+  oauthEl('oauth-form').dataset.reauthGid = opts.reauth?.gid ?? '';
+  void loadOAuthGroups(opts.reauth?.gid);
+  if (typeof modal.showModal === 'function') {
+    modal.showModal();
+  } else {
+    modal.setAttribute('open', 'open');
+  }
+}
+
+function closeOAuthModal() {
+  stopOAuthPoll();
+  oauthSessionId = null;
+  const modal = oauthEl('oauth-modal');
+  if (typeof modal.close === 'function') {
+    modal.close();
+  } else {
+    modal.removeAttribute('open');
+  }
+}
+
+async function beginOAuthLogin() {
+  setOAuthError('');
+  const alias = oauthEl('oauth-alias').value.trim();
+  if (!alias) {
+    setOAuthError('Укажи alias');
+    return;
+  }
+  const groupValue = oauthEl('oauth-group').value;
+  const body = { alias };
+  if (groupValue === '__new__') {
+    const newGroupName = oauthEl('oauth-new-group').value.trim() || 'default';
+    body.newGroupName = newGroupName;
+  } else {
+    body.gid = groupValue;
+  }
+
+  const reauthUuid = oauthEl('oauth-form').dataset.reauthUuid;
+  const reauthGid = oauthEl('oauth-form').dataset.reauthGid;
+  let data;
+  if (reauthUuid) {
+    data = await api('/api/accounts/reauth', {
+      method: 'POST',
+      body: JSON.stringify({
+        provider: 'openai',
+        id: reauthUuid,
+        alias,
+      }),
+    });
+    oauthSessionId = data.sessionId;
+    oauthEl('oauth-link').href = data.authUrl;
+    window.open(data.authUrl, '_blank', 'noopener,noreferrer');
+  } else {
+    data = await api('/api/login/openai/begin', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    oauthSessionId = data.sessionId;
+    oauthEl('oauth-link').href = data.authUrl;
+    window.open(data.authUrl, '_blank', 'noopener,noreferrer');
+  }
+
+  setOAuthStep('wait');
+  stopOAuthPoll();
+  oauthPollTimer = setInterval(() => void pollOAuthSession(), 1200);
+  void pollOAuthSession();
+}
+
+async function submitOAuthPaste() {
+  if (!oauthSessionId) {
+    setOAuthError('Сначала нажми «Войти через ChatGPT»');
+    return;
+  }
+  const code = oauthEl('oauth-paste').value.trim();
+  if (!code) {
+    setOAuthError('Вставь callback URL или code');
+    return;
+  }
+  setOAuthError('');
+  await api('/api/login/openai/submit', {
+    method: 'POST',
+    body: JSON.stringify({ sessionId: oauthSessionId, code }),
+  });
+  await pollOAuthSession();
+}
+
+function initOAuthModal() {
+  oauthEl('oauth-group').addEventListener('change', () => {
+    oauthEl('oauth-new-group-wrap').classList.toggle(
+      'hidden',
+      oauthEl('oauth-group').value !== '__new__',
+    );
+  });
+  oauthEl('oauth-begin').addEventListener('click', () => {
+    void beginOAuthLogin().catch((err) => setOAuthError(err.message ?? 'OAuth begin failed'));
+  });
+  oauthEl('oauth-submit-paste').addEventListener('click', () => {
+    void submitOAuthPaste().catch((err) => setOAuthError(err.message ?? 'Submit failed'));
+  });
+  oauthEl('oauth-close').addEventListener('click', closeOAuthModal);
+  oauthEl('oauth-done-close').addEventListener('click', closeOAuthModal);
+  oauthEl('oauth-modal').addEventListener('close', stopOAuthPoll);
 }
 
 function initPwa() {
@@ -496,6 +758,7 @@ function bind() {
 
 initTheme();
 initPwa();
+initOAuthModal();
 bind();
 showPanel('accounts');
 void refresh().then(() => void probeLimits());

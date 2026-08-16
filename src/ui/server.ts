@@ -9,8 +9,15 @@ import { publicPort } from '../proxy-lifecycle.js';
 import { uiDir } from '../paths.js';
 import { buildStatusPayload } from './status.js';
 import { probeAccountsPayload } from './probes.js';
-import { openAnthropicLoginTerminal, openAnthropicReauthTerminal, openOpenAiLoginTerminal, openOpenAiReauthTerminal } from './login.js';
-import { removeAnthropicAccount, removeCodexerUser } from './account-store.js';
+import { openAnthropicLoginTerminal, openAnthropicReauthTerminal } from './login.js';
+import { removeAnthropicAccount } from './account-store.js';
+import {
+  beginOpenAiLogin,
+  beginOpenAiReauth,
+  getOpenAiLoginSession,
+  listOpenAiLoginGroups,
+  submitOpenAiLoginCode,
+} from './openai-login-flow.js';
 
 const daemonScript = fileURLToPath(new URL('../server/daemon.js', import.meta.url));
 
@@ -110,13 +117,79 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): P
     return true;
   }
 
-  if (req.method === 'POST' && url.pathname === '/api/login/openai') {
+  if (req.method === 'GET' && url.pathname === '/api/login/openai/groups') {
     try {
-      const opened = await openOpenAiLoginTerminal();
-      json(res, 200, { ok: opened, terminal: opened });
+      json(res, 200, { groups: await listOpenAiLoginGroups() });
     } catch (error) {
       json(res, 500, { error: error instanceof Error ? error.message : String(error) });
     }
+    return true;
+  }
+
+  if (req.method === 'GET' && url.pathname.startsWith('/api/login/openai/status/')) {
+    const sessionId = url.pathname.slice('/api/login/openai/status/'.length);
+    const session = getOpenAiLoginSession(sessionId);
+    if (!session) {
+      json(res, 404, { error: 'login session not found or expired' });
+      return true;
+    }
+    json(res, 200, {
+      status: session.status,
+      authUrl: session.authUrl,
+      alias: session.alias,
+      error: session.error,
+      account: session.account,
+    });
+    return true;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/login/openai/begin') {
+    try {
+      const raw = await readBody(req);
+      let body: { alias?: string; gid?: string; newGroupName?: string } = {};
+      if (raw.trim()) {
+        body = JSON.parse(raw) as typeof body;
+      }
+      const alias = typeof body.alias === 'string' ? body.alias : '';
+      const gid = typeof body.gid === 'string' ? body.gid : undefined;
+      const newGroupName = typeof body.newGroupName === 'string' ? body.newGroupName : undefined;
+      const result = await beginOpenAiLogin({ alias, gid, newGroupName });
+      json(res, 200, result);
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) });
+    }
+    return true;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/login/openai/submit') {
+    try {
+      const raw = await readBody(req);
+      let body: { sessionId?: string; code?: string } = {};
+      if (raw.trim()) {
+        body = JSON.parse(raw) as typeof body;
+      }
+      const sessionId = typeof body.sessionId === 'string' ? body.sessionId.trim() : '';
+      const code = typeof body.code === 'string' ? body.code : '';
+      if (!sessionId || !code) {
+        json(res, 400, { error: 'sessionId and code are required' });
+        return true;
+      }
+      const session = await submitOpenAiLoginCode(sessionId, code);
+      json(res, 200, {
+        status: session.status,
+        account: session.account,
+        error: session.error,
+      });
+    } catch (error) {
+      json(res, 400, { error: error instanceof Error ? error.message : String(error) });
+    }
+    return true;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/login/openai') {
+    json(res, 410, {
+      error: 'use POST /api/login/openai/begin for in-app OAuth',
+    });
     return true;
   }
 
@@ -150,10 +223,21 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): P
     try {
       const config = await ensureConfig();
       if (provider === 'openai') {
-        const removed = await removeCodexerUser(config.openai.configFile, id);
-        const alias = typeof body.alias === 'string' && body.alias.trim() ? body.alias.trim() : id;
-        const opened = await openOpenAiReauthTerminal(alias);
-        json(res, 200, { ok: opened, terminal: opened, removed, alias });
+        const alias =
+          typeof body.alias === 'string' && body.alias.trim() ? body.alias.trim() : id;
+        const account = (await buildStatusPayload()).openaiAccounts.find(
+          (row) => row.uuid === id || row.alias === id,
+        );
+        if (!account?.gid) {
+          json(res, 400, { error: 'account group not found' });
+          return true;
+        }
+        const result = await beginOpenAiReauth({
+          uuid: account.uuid || id,
+          alias,
+          gid: account.gid,
+        });
+        json(res, 200, { ok: true, inApp: true, ...result, alias });
         return true;
       }
       const removed = await removeAnthropicAccount(config.anthropic.configFile, id);
